@@ -63,7 +63,7 @@ flowchart TB
     RAG --> Vector[(ChromaDB)]
     API --> Redis[(Redis)]
     API --> Obs[日志、指标、追踪]
-    Obs --> Metrics[/metrics]
+    Obs --> Metrics["/metrics"]
 ```
 
 - **前端**：React 18 + TypeScript + Vite

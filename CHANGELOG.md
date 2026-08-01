@@ -10,6 +10,7 @@
 
 - 新增根目录 `README.md`，说明患者照护闭环、AI 问答、内置执行步骤、评估与可观测能力，以及端口 `8001` 的本地启动方式。
 - README 顶部改为纯 GitHub Markdown，避免 HTML 容器内 Markdown 的渲染兼容性问题；补充首次演示前的本地模型密钥配置说明。
+- 修复 README Mermaid 架构图中 `/metrics` 节点标签的 GitHub 渲染语法。
 
 > 每次改完代码顺手加一条，格式：`YYYY-MM-DD — 简述改了啥`
 
