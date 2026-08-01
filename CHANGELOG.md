@@ -1,5 +1,11 @@
 # CHANGELOG — 患者照护助手
 
+## 2026-08-01 — 面试演示入口与 Cloudflare 穿透
+
+- `start_tunnel.bat` 改为面试演示启动入口：自动构建 React 前端、以 `DEMO_MODE=true` 启动虚构病例，并将由 FastAPI 托管的完整界面通过 Cloudflare Tunnel 分享。
+- 修复 PostgreSQL 探活端口 `5432` → `5433`，移除硬编码本机目录和旧隧道名称；Cloudflared 未安装时下载到已忽略的项目内 `.tools/`。
+- 浏览器页签标题同步为“患者照护助手｜照护协同健康工作台”。
+
 ## 2026-08-01 — GitHub 项目入口文档
 
 - 新增根目录 `README.md`，说明患者照护闭环、AI 问答、内置执行步骤、评估与可观测能力，以及端口 `8001` 的本地启动方式。

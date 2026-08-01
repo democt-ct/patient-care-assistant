@@ -5,6 +5,7 @@ app/mcp/local_settings.py
 .env
 .env.local
 .cloudflared/
+.tools/
 .venv*/
 .pytest-tmp*/
 
