@@ -1,0 +1,17 @@
+{
+  "chunks": [
+    {
+      "source_id": "nmpa_drug_label",
+      "source_type": "drug_label",
+      "source_url": "https://www.nmpa.gov.cn/",
+      "source_ref": "在此填写批准文号、说明书版本或内部归档号",
+      "version": "在此填写来源版本",
+      "domain": "medication",
+      "title": "在此填写经审核的患者宣教主题",
+      "chunk_text": "在此填写经临床审核、适合患者阅读的知识片段。不要直接复制未获授权的内容。",
+      "evidence_level": "official-label",
+      "review_status": "unreviewed",
+      "tags": "药品说明书,患者宣教"
+    }
+  ]
+}
