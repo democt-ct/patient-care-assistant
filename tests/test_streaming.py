@@ -25,6 +25,18 @@ class TestSSEEventFormat:
 class TestStreamEndpoint:
     """Integration tests for the SSE stream endpoint."""
 
+    @pytest.fixture(autouse=True)
+    def stub_agent(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.api.stream_routes.run_agent_tool_query_stream",
+            lambda **kwargs: {
+                "answer": "测试回答",
+                "speech_text": "测试回答",
+                "intent": "general_chat",
+                "chosen_tool": "test_stub",
+            },
+        )
+
     def test_stream_endpoint_health(self, client):
         """The stream endpoint should accept POST requests."""
         resp = client.post("/api/v1/mcp/agent/query-stream", json={
@@ -36,7 +48,7 @@ class TestStreamEndpoint:
         assert resp.headers.get("content-type", "").startswith("text/event-stream")
 
     def test_stream_endpoint_events(self, client):
-        """The stream should yield proper SSE events."""
+        """The stream should yield proper SSE events without calling an external model."""
         resp = client.post("/api/v1/mcp/agent/query-stream", json={
             "question": "你好",
             "chat_mode": "general",
@@ -51,6 +63,24 @@ class TestStreamEndpoint:
         # Should include at least status and token/done events
         assert "status" in event_types
         assert "token" in event_types or "done" in event_types
+
+    def test_stream_failure_returns_safe_fallback(self, client, monkeypatch):
+        def fail_agent(**kwargs):
+            raise RuntimeError("model unavailable")
+
+        monkeypatch.setattr(
+            "app.api.stream_routes.run_agent_tool_query_stream",
+            fail_agent,
+        )
+        resp = client.post("/api/v1/mcp/agent/query-stream", json={
+            "question": "你好",
+            "chat_mode": "general",
+        })
+
+        assert "event: error" in resp.text
+        assert "event: token" in resp.text
+        assert "event: done" in resp.text
+        assert "service_fallback" in resp.text
 
     def test_stream_empty_question(self, client):
         """Empty question should return 400."""

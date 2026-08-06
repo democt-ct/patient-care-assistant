@@ -143,6 +143,11 @@ export interface ChatMessage {
   speech_url?: string;
   /** A user-safe summary of the completed agent workflow for this answer. */
   process?: AgentProcessState;
+  /** 统一输出契约：依据 / 风险 / 下一步 / 任务类型 */
+  risk_level?: string;
+  next_action?: string;
+  evidence_summary?: string;
+  task_route?: Record<string, unknown>;
 }
 
 // ============================================================
@@ -202,6 +207,16 @@ export interface AgentQueryResponse {
   intent?: string;
   intent_confidence?: number;
   chosen_tool?: string;
+  risk_level?: string;
+  next_action?: string;
+  evidence_summary?: string;
+  task_route?: Record<string, unknown>;
+  citation_report?: {
+    checked?: boolean;
+    valid?: boolean;
+    supported_count?: number;
+    unsupported_count?: number;
+  };
 }
 
 // ============================================================

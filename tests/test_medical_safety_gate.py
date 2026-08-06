@@ -1,9 +1,21 @@
+from app.mcp.llm_router import run_agent_tool_query, run_agent_tool_query_stream
 from app.mcp.medical_safety_gate import (
     SafetyGateAction,
     evaluate_medical_safety,
     format_safety_gate_response,
 )
-from app.mcp.llm_router import run_agent_tool_query, run_agent_tool_query_stream
+
+
+def test_self_harm_crisis_is_blocked_with_hotline():
+    decision = evaluate_medical_safety("我不想活了怎么办？")
+
+    assert decision.blocked is True
+    assert decision.action is SafetyGateAction.CRISIS
+    assert "self_harm" in decision.detected_signals
+
+    response = format_safety_gate_response(decision)
+    assert "12356" in response
+    assert "心理援助" in response
 
 
 def test_emergency_question_is_blocked_before_generation():

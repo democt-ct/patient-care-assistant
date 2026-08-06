@@ -43,6 +43,9 @@
     <button id="runPassedBtn">↻ 重试失败</button>
     <button id="clearBtn" class="danger">✕ 清空结果</button>
     <button id="exportBtn" style="background:var(--surface2);border-color:var(--blue);color:var(--blue)">📥 导出报告</button>
+    <label class="ragas-toggle" style="font-size:12px;color:var(--text-dim);display:inline-flex;align-items:center;gap:4px">
+      <input type="checkbox" id="ragasToggle"> RAGAS 评判（慢，额外 LLM 调用）
+    </label>
     <input type="text" id="apiBase" value="" placeholder="API 地址 (默认当前)">
   </div>
 

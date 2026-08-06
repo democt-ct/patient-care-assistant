@@ -1810,11 +1810,14 @@ def _structured_fact_tool_for_question(question: str) -> Optional[str]:
     normalized = (question or "").strip().lower()
     if not normalized:
         return None
-    if any(keyword in normalized for keyword in ("紧急联系人", "联系人", "过敏", "磺胺", "青霉素", "头孢", "阿司匹林")):
+    if any(keyword in normalized for keyword in ("紧急联系人", "联系人", "过敏", "磺胺", "青霉素", "头孢", "阿司匹林", "上次在")):
         return "get_patient_profile"
-    if any(keyword in normalized for keyword in ("医生是谁", "看病的医生", "就诊医生", "接诊医生", "复诊", "复查", "下次什么时候")):
+    if any(keyword in normalized for keyword in (
+        "医生是谁", "看病的医生", "就诊医生", "接诊医生", "复诊", "复查",
+        "下次什么时候", "最近一次", "上次发热", "上次在", "上次去", "上次看", "哪天",
+    )):
         return "get_visit_records"
-    if any(keyword in normalized for keyword in ("诊断", "什么病", "疾病", "吃什么药", "什么药", "用药", "药物", "手术", "血糖", "hba1c", "糖化血红蛋白")):
+    if any(keyword in normalized for keyword in ("诊断", "什么病", "疾病", "吃什么药", "什么药", "用药", "药物", "手术", "血糖", "hba1c", "糖化血红蛋白", "布洛芬")):
         return "get_medical_records"
     return None
 
@@ -1890,6 +1893,207 @@ def _try_structured_fact_query(
     }
 
 
+def run_agent_execution(
+    question: str,
+    auth_token: Optional[str] = None,
+    patient_id: Optional[str] = None,
+    hospital_id: Optional[str] = None,
+    chat_mode: Optional[str] = None,
+    claimed_name: Optional[str] = None,
+    claimed_phone: Optional[str] = None,
+    claimed_birth_year: Optional[int] = None,
+    confirmed_patient_name: Optional[str] = None,
+    image_bytes: Optional[bytes] = None,
+    image_content_type: Optional[str] = None,
+    image_filename: Optional[str] = None,
+    conversation_context: Optional[str] = None,
+    allergy_drugs: Optional[list[str]] = None,
+    allergy_history_unknown: bool = False,
+    risk_signals: Optional[MCPRiskSignals] = None,
+) -> Dict[str, Any]:
+    """Executor adapter: run intent → plan → tool execution → generate.
+
+    Deliberately does NOT re-run the safety gate or structured-fact routing;
+    the Agent Graph has already handled them. Direct callers should use
+    ``run_agent_tool_query`` for the full legacy pipeline.
+    """
+    try:
+        llm = get_llm()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    normalized_chat_mode = (chat_mode or "").strip().lower()
+    image_analysis = None
+    if image_bytes:
+        try:
+            image_analysis = analyze_image_with_llm(
+                question=question,
+                image_bytes=image_bytes,
+                content_type=image_content_type,
+                filename=image_filename,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    if normalized_chat_mode == "general":
+        answer = _generate_open_answer_v2(
+            llm,
+            question=question,
+            image_analysis=image_analysis,
+            conversation_context=conversation_context,
+            allergy_drugs=allergy_drugs,
+            allergy_history_unknown=allergy_history_unknown,
+            risk_signals=risk_signals,
+            intent="general_chat",
+        )
+        speech_text = _strip_markdown_for_speech(answer)
+        confidence, confidence_reason = _calculate_answer_confidence(
+            intent="general_chat",
+            latest_tool_name="direct_model_answer",
+            latest_tool_result={"tool_name": "direct_model_answer", "success": True, "data": {"source": "general_direct_answer"}, "message": "ok"},
+            has_image=bool(image_analysis),
+            has_conversation_context=bool(conversation_context),
+        )
+        return {
+            "question": question,
+            "answer": answer,
+            "speech_text": speech_text,
+            "image_analysis": image_analysis,
+            "intent": "general_chat",
+            "intent_confidence": 1.0,
+            "planning_strategy": "general_direct_answer",
+            "chosen_tool": "direct_model_answer",
+            "chosen_tools": ["direct_model_answer"],
+            "tool_arguments": {},
+            "tool_result": {"tool_name": "direct_model_answer", "success": True, "data": {"source": "general_direct_answer"}, "message": "ok"},
+            "execution_trace": [],
+            "planning": {
+                "intent_reasoning": "General chat mode bypassed tool routing.",
+                "focus": [],
+                "latest_only": False,
+                "candidates": [],
+                "chosen_plan": {"plan_id": "general_direct_answer", "steps": []},
+                "finish_reasoning": "Answered directly in general chat mode.",
+            },
+            "answer_confidence": confidence,
+            "confidence_reason": confidence_reason,
+        }
+
+    intent_state = _identify_intent(
+        llm,
+        question=question,
+        enriched_question=_build_enriched_question(question, image_analysis, conversation_context=conversation_context),
+        image_analysis=image_analysis,
+        auth_token=auth_token,
+        patient_id=patient_id,
+        hospital_id=hospital_id,
+    )
+
+    direct = _select_direct_path(
+        llm=llm,
+        question=question,
+        intent_state=intent_state,
+        image_analysis=image_analysis,
+        conversation_context=conversation_context,
+        auth_token=auth_token,
+        patient_id=patient_id,
+        claimed_name=claimed_name,
+        claimed_phone=claimed_phone,
+        claimed_birth_year=claimed_birth_year,
+        confirmed_patient_name=confirmed_patient_name,
+        allergy_drugs=allergy_drugs,
+        allergy_history_unknown=allergy_history_unknown,
+        risk_signals=risk_signals,
+    )
+    if direct is not None:
+        return direct
+
+    tools = [tool.model_dump() for tool in mcp_server.list_tools() if tool.name != "issue_identity_token"]
+    plan_candidates = _generate_plan_candidates(
+        llm,
+        question=question,
+        enriched_question=_build_enriched_question(question, image_analysis, conversation_context=conversation_context),
+        tools=tools,
+        intent_state=intent_state,
+        auth_token=auth_token,
+        patient_id=patient_id,
+        hospital_id=hospital_id,
+        image_analysis=image_analysis,
+    )
+    chosen_plan = _select_consensus_plan(plan_candidates, intent_state)
+    execution = _execute_plan_steps(
+        question=question,
+        intent_state=intent_state,
+        chosen_plan=chosen_plan,
+        auth_token=auth_token,
+        patient_id=patient_id,
+        hospital_id=hospital_id,
+    )
+
+    try:
+        answer = _generate_answer_text(
+            llm,
+            question=question,
+            intent_state=intent_state,
+            chosen_plan=chosen_plan,
+            execution_trace=execution["execution_trace"],
+            latest_tool_name=execution["chosen_tool"],
+            latest_tool_result=execution["tool_result"],
+            image_analysis=image_analysis,
+            conversation_context=conversation_context,
+            allergy_drugs=allergy_drugs,
+            allergy_history_unknown=allergy_history_unknown,
+            risk_signals=risk_signals,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"回答生成失败，请检查 LLM 配置后重试: {exc}",
+        ) from exc
+
+    speech_text = _strip_markdown_for_speech(answer)
+    confidence, confidence_reason = _calculate_answer_confidence(
+        intent=intent_state["intent"],
+        latest_tool_name=execution["chosen_tool"],
+        latest_tool_result=execution["tool_result"],
+        has_image=bool(image_analysis),
+        has_conversation_context=bool(conversation_context),
+    )
+    return {
+        "question": question,
+        "answer": answer,
+        "speech_text": speech_text,
+        "image_analysis": image_analysis,
+        "intent": intent_state["intent"],
+        "intent_confidence": intent_state["confidence"],
+        "planning_strategy": "intent_plan_then_generate",
+        "chosen_tool": execution["chosen_tool"],
+        "chosen_tools": execution["chosen_tools"],
+        "tool_arguments": execution["tool_arguments"],
+        "tool_result": execution["tool_result"],
+        "execution_trace": execution["execution_trace"],
+        "planning": {
+            "intent_reasoning": intent_state["reasoning_summary"],
+            "focus": _build_focus_from_intent(intent_state),
+            "latest_only": intent_state["latest_only"],
+            "candidates": [
+                {
+                    "plan_id": candidate.get("plan_id"),
+                    "confidence": candidate.get("confidence"),
+                    "consensus_score": candidate.get("consensus_score"),
+                    "reasoning_summary": candidate.get("reasoning_summary"),
+                    "tool_sequence": candidate.get("tool_sequence") or _tool_names_from_steps(candidate.get("steps", [])),
+                }
+                for candidate in plan_candidates
+            ],
+            "chosen_plan": chosen_plan,
+            "finish_reasoning": execution["finish_reasoning"],
+        },
+        "answer_confidence": confidence,
+        "confidence_reason": confidence_reason,
+    }
+
+
 def run_agent_tool_query(
     question: str,
     auth_token: Optional[str] = None,
@@ -1908,240 +2112,14 @@ def run_agent_tool_query(
     allergy_history_unknown: bool = False,
     risk_signals: Optional[MCPRiskSignals] = None,
 ) -> Dict[str, Any]:
-    safety_decision = evaluate_medical_safety(question)
-    if safety_decision.blocked:
-        return _build_safety_gate_result(question, safety_decision)
+    """Legacy entry point: safety gate → structured fact → executor adapter.
 
-    structured_fact_result = _try_structured_fact_query(
-        question=question,
-        auth_token=auth_token,
-        patient_id=patient_id,
-        hospital_id=hospital_id,
-    )
-    if structured_fact_result is not None:
-        return structured_fact_result
-
-    try:
-        llm = get_llm()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-
-    normalized_chat_mode = (chat_mode or "").strip().lower()
-    image_analysis = None
-    if image_bytes:
-        try:
-            image_analysis = analyze_image_with_llm(
-                question=question,
-                image_bytes=image_bytes,
-                content_type=image_content_type,
-                filename=image_filename,
-            )
-        except RuntimeError as exc:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-
-    if normalized_chat_mode == "general":
-        answer = _generate_open_answer_v2(
-            llm,
-            question=question,
-            image_analysis=image_analysis,
-            conversation_context=conversation_context,
-            allergy_drugs=allergy_drugs,
-            allergy_history_unknown=allergy_history_unknown,
-            risk_signals=risk_signals,
-            intent="general_chat",
-        )
-        speech_text = _strip_markdown_for_speech(answer)
-        confidence, confidence_reason = _calculate_answer_confidence(
-            intent="general_chat",
-            latest_tool_name="direct_model_answer",
-            latest_tool_result={"tool_name": "direct_model_answer", "success": True, "data": {"source": "general_direct_answer"}, "message": "ok"},
-            has_image=bool(image_analysis),
-            has_conversation_context=bool(conversation_context),
-        )
-        return {
-            "question": question,
-            "answer": answer,
-            "speech_text": speech_text,
-            "image_analysis": image_analysis,
-            "intent": "general_chat",
-            "intent_confidence": 1.0,
-            "planning_strategy": "general_direct_answer",
-            "chosen_tool": "direct_model_answer",
-            "chosen_tools": ["direct_model_answer"],
-            "tool_arguments": {},
-            "tool_result": {"tool_name": "direct_model_answer", "success": True, "data": {"source": "general_direct_answer"}, "message": "ok"},
-            "execution_trace": [],
-            "planning": {
-                "intent_reasoning": "General chat mode bypassed tool routing.",
-                "focus": [],
-                "latest_only": False,
-                "candidates": [],
-                "chosen_plan": {"plan_id": "general_direct_answer", "steps": []},
-                "finish_reasoning": "Answered directly in general chat mode.",
-            },
-            "answer_confidence": confidence,
-            "confidence_reason": confidence_reason,
-        }
-
-    intent_state = _identify_intent(
-        llm,
-        question=question,
-        enriched_question=_build_enriched_question(question, image_analysis, conversation_context=conversation_context),
-        image_analysis=image_analysis,
-        auth_token=auth_token,
-        patient_id=patient_id,
-        hospital_id=hospital_id,
-    )
-
-    direct = _select_direct_path(
-        llm=llm,
-        question=question,
-        intent_state=intent_state,
-        image_analysis=image_analysis,
-        conversation_context=conversation_context,
-        auth_token=auth_token,
-        patient_id=patient_id,
-        claimed_name=claimed_name,
-        claimed_phone=claimed_phone,
-        claimed_birth_year=claimed_birth_year,
-        confirmed_patient_name=confirmed_patient_name,
-        allergy_drugs=allergy_drugs,
-        allergy_history_unknown=allergy_history_unknown,
-        risk_signals=risk_signals,
-    )
-    if direct is not None:
-        return direct
-
-    tools = [tool.model_dump() for tool in mcp_server.list_tools() if tool.name != "issue_identity_token"]
-    plan_candidates = _generate_plan_candidates(
-        llm,
-        question=question,
-        enriched_question=_build_enriched_question(question, image_analysis, conversation_context=conversation_context),
-        tools=tools,
-        intent_state=intent_state,
-        auth_token=auth_token,
-        patient_id=patient_id,
-        hospital_id=hospital_id,
-        image_analysis=image_analysis,
-    )
-    chosen_plan = _select_consensus_plan(plan_candidates, intent_state)
-    execution = _execute_plan_steps(
-        question=question,
-        intent_state=intent_state,
-        chosen_plan=chosen_plan,
-        auth_token=auth_token,
-        patient_id=patient_id,
-        hospital_id=hospital_id,
-    )
-
-    try:
-        answer = _generate_answer_text(
-            llm,
-            question=question,
-            intent_state=intent_state,
-            chosen_plan=chosen_plan,
-            execution_trace=execution["execution_trace"],
-            latest_tool_name=execution["chosen_tool"],
-            latest_tool_result=execution["tool_result"],
-            image_analysis=image_analysis,
-            conversation_context=conversation_context,
-            allergy_drugs=allergy_drugs,
-            allergy_history_unknown=allergy_history_unknown,
-            risk_signals=risk_signals,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"回答生成失败，请检查 LLM 配置后重试: {exc}",
-        ) from exc
-
-    speech_text = _strip_markdown_for_speech(answer)
-    confidence, confidence_reason = _calculate_answer_confidence(
-        intent=intent_state["intent"],
-        latest_tool_name=execution["chosen_tool"],
-        latest_tool_result=execution["tool_result"],
-        has_image=bool(image_analysis),
-        has_conversation_context=bool(conversation_context),
-    )
-    return {
-        "question": question,
-        "answer": answer,
-        "speech_text": speech_text,
-        "image_analysis": image_analysis,
-        "intent": intent_state["intent"],
-        "intent_confidence": intent_state["confidence"],
-        "planning_strategy": "intent_plan_then_generate",
-        "chosen_tool": execution["chosen_tool"],
-        "chosen_tools": execution["chosen_tools"],
-        "tool_arguments": execution["tool_arguments"],
-        "tool_result": execution["tool_result"],
-        "execution_trace": execution["execution_trace"],
-        "planning": {
-            "intent_reasoning": intent_state["reasoning_summary"],
-            "focus": _build_focus_from_intent(intent_state),
-            "latest_only": intent_state["latest_only"],
-            "candidates": [
-                {
-                    "plan_id": candidate.get("plan_id"),
-                    "confidence": candidate.get("confidence"),
-                    "consensus_score": candidate.get("consensus_score"),
-                    "reasoning_summary": candidate.get("reasoning_summary"),
-                    "tool_sequence": candidate.get("tool_sequence") or _tool_names_from_steps(candidate.get("steps", [])),
-                }
-                for candidate in plan_candidates
-            ],
-            "chosen_plan": chosen_plan,
-            "finish_reasoning": execution["finish_reasoning"],
-        },
-        "answer_confidence": confidence,
-        "confidence_reason": confidence_reason,
-    }
-
-
-# ============================================================
-# Streaming variant — emits phase callbacks for real-time SSE
-# ============================================================
-
-PhaseCallback = Callable[[str, str], None]  # (phase, message) -> None
-
-
-def run_agent_tool_query_stream(
-    question: str,
-    *,
-    on_phase: Optional[PhaseCallback] = None,
-    auth_token: Optional[str] = None,
-    patient_id: Optional[str] = None,
-    hospital_id: Optional[str] = None,
-    chat_mode: Optional[str] = None,
-    claimed_name: Optional[str] = None,
-    claimed_phone: Optional[str] = None,
-    claimed_birth_year: Optional[int] = None,
-    confirmed_patient_name: Optional[str] = None,
-    image_bytes: Optional[bytes] = None,
-    image_content_type: Optional[str] = None,
-    image_filename: Optional[str] = None,
-    conversation_context: Optional[str] = None,
-    allergy_drugs: Optional[list[str]] = None,
-    allergy_history_unknown: bool = False,
-    risk_signals: Optional[MCPRiskSignals] = None,
-) -> Dict[str, Any]:
-    """Streaming-capable variant of run_agent_tool_query.
-
-    Calls on_phase(phase, message) at each pipeline stage so the caller
-    can push real-time SSE events.  The return value is identical to the
-    non-streaming version.
+    Kept for direct callers and backward compatibility; the Agent Graph uses
+    ``run_agent_execution`` directly to avoid duplicate safety checks and
+    duplicate structured-fact routing.
     """
-
-    def _emit(phase: str, message: str):
-        if on_phase:
-            try:
-                on_phase(phase, message)
-            except Exception:
-                pass
-
     safety_decision = evaluate_medical_safety(question)
     if safety_decision.blocked:
-        _emit("safety", "医疗安全门禁已拦截自由生成。")
         return _build_safety_gate_result(question, safety_decision)
 
     structured_fact_result = _try_structured_fact_query(
@@ -2151,206 +2129,25 @@ def run_agent_tool_query_stream(
         hospital_id=hospital_id,
     )
     if structured_fact_result is not None:
-        _emit("context", "已从结构化病历中定位相关记录。")
-        _emit("tool_execution", "已完成结构化记录查询。")
         return structured_fact_result
 
-    # ── LLM init ──
-    _emit("agent", "正在初始化模型...")
-    try:
-        llm = get_llm()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-
-    normalized_chat_mode = (chat_mode or "").strip().lower()
-    image_analysis = None
-    if image_bytes:
-        _emit("agent", "正在分析图片...")
-        try:
-            image_analysis = analyze_image_with_llm(
-                question=question,
-                image_bytes=image_bytes,
-                content_type=image_content_type,
-                filename=image_filename,
-            )
-        except RuntimeError as exc:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-
-    # ── General chat short-circuit ──
-    if normalized_chat_mode == "general":
-        _emit("agent", "正在生成回答...")
-        answer = _generate_open_answer_v2(
-            llm,
-            question=question,
-            image_analysis=image_analysis,
-            conversation_context=conversation_context,
-            allergy_drugs=allergy_drugs,
-            allergy_history_unknown=allergy_history_unknown,
-            risk_signals=risk_signals,
-            intent="general_chat",
-        )
-        speech_text = _strip_markdown_for_speech(answer)
-        confidence, confidence_reason = _calculate_answer_confidence(
-            intent="general_chat",
-            latest_tool_name="direct_model_answer",
-            latest_tool_result={"tool_name": "direct_model_answer", "success": True, "data": {"source": "general_direct_answer"}, "message": "ok"},
-            has_image=bool(image_analysis),
-            has_conversation_context=bool(conversation_context),
-        )
-        return {
-            "question": question,
-            "answer": answer,
-            "speech_text": speech_text,
-            "image_analysis": image_analysis,
-            "intent": "general_chat",
-            "intent_confidence": 1.0,
-            "planning_strategy": "general_direct_answer",
-            "chosen_tool": "direct_model_answer",
-            "chosen_tools": ["direct_model_answer"],
-            "tool_arguments": {},
-            "tool_result": {"tool_name": "direct_model_answer", "success": True, "data": {"source": "general_direct_answer"}, "message": "ok"},
-            "execution_trace": [],
-            "planning": {
-                "intent_reasoning": "General chat mode bypassed tool routing.",
-                "focus": [],
-                "latest_only": False,
-                "candidates": [],
-                "chosen_plan": {"plan_id": "general_direct_answer", "steps": []},
-                "finish_reasoning": "Answered directly in general chat mode.",
-            },
-            "answer_confidence": confidence,
-            "confidence_reason": confidence_reason,
-        }
-
-    # ── Intent identification ──
-    _emit("intent", "正在识别问题意图...")
-    intent_state = _identify_intent(
-        llm,
+    return run_agent_execution(
         question=question,
-        enriched_question=_build_enriched_question(question, image_analysis, conversation_context=conversation_context),
-        image_analysis=image_analysis,
         auth_token=auth_token,
         patient_id=patient_id,
         hospital_id=hospital_id,
-    )
-    _emit("intent", f"意图: {intent_state['intent']}（置信度 {intent_state['confidence']:.0%}）")
-
-    # ── Direct path check ──
-    direct = _select_direct_path(
-        llm=llm,
-        question=question,
-        intent_state=intent_state,
-        image_analysis=image_analysis,
-        conversation_context=conversation_context,
-        auth_token=auth_token,
-        patient_id=patient_id,
+        chat_mode=chat_mode,
         claimed_name=claimed_name,
         claimed_phone=claimed_phone,
         claimed_birth_year=claimed_birth_year,
         confirmed_patient_name=confirmed_patient_name,
+        image_bytes=image_bytes,
+        image_content_type=image_content_type,
+        image_filename=image_filename,
+        conversation_context=conversation_context,
         allergy_drugs=allergy_drugs,
         allergy_history_unknown=allergy_history_unknown,
         risk_signals=risk_signals,
     )
-    if direct is not None:
-        _emit("agent", "直接生成回答...")
-        return direct
 
-    # ── Planning ──
-    _emit("planning", "正在规划查询方案...")
-    tools = [tool.model_dump() for tool in mcp_server.list_tools() if tool.name != "issue_identity_token"]
-    plan_candidates = _generate_plan_candidates(
-        llm,
-        question=question,
-        enriched_question=_build_enriched_question(question, image_analysis, conversation_context=conversation_context),
-        tools=tools,
-        intent_state=intent_state,
-        auth_token=auth_token,
-        patient_id=patient_id,
-        hospital_id=hospital_id,
-        image_analysis=image_analysis,
-    )
-    chosen_plan = _select_consensus_plan(plan_candidates, intent_state)
-    plan_steps = chosen_plan.get("steps") or []
-    if plan_steps:
-        tool_seq = " → ".join(s.get("tool_name", "") for s in plan_steps)
-        _emit("planning", f"方案: {tool_seq}")
 
-    # ── Tool execution ──
-    _emit("tool_execution", "正在执行工具查询...")
-    execution = _execute_plan_steps(
-        question=question,
-        intent_state=intent_state,
-        chosen_plan=chosen_plan,
-        auth_token=auth_token,
-        patient_id=patient_id,
-        hospital_id=hospital_id,
-    )
-    if execution.get("chosen_tools") and execution["chosen_tools"] != ["direct_answer"]:
-        tool_names = ", ".join(execution["chosen_tools"])
-        _emit("tool_execution", f"已完成: {tool_names}")
-
-    # ── Answer generation ──
-    _emit("agent", "正在生成回答...")
-    try:
-        answer = _generate_answer_text(
-            llm,
-            question=question,
-            intent_state=intent_state,
-            chosen_plan=chosen_plan,
-            execution_trace=execution["execution_trace"],
-            latest_tool_name=execution["chosen_tool"],
-            latest_tool_result=execution["tool_result"],
-            image_analysis=image_analysis,
-            conversation_context=conversation_context,
-            allergy_drugs=allergy_drugs,
-            allergy_history_unknown=allergy_history_unknown,
-            risk_signals=risk_signals,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"回答生成失败，请检查 LLM 配置后重试: {exc}",
-        ) from exc
-
-    speech_text = _strip_markdown_for_speech(answer)
-    confidence, confidence_reason = _calculate_answer_confidence(
-        intent=intent_state["intent"],
-        latest_tool_name=execution["chosen_tool"],
-        latest_tool_result=execution["tool_result"],
-        has_image=bool(image_analysis),
-        has_conversation_context=bool(conversation_context),
-    )
-    return {
-        "question": question,
-        "answer": answer,
-        "speech_text": speech_text,
-        "image_analysis": image_analysis,
-        "intent": intent_state["intent"],
-        "intent_confidence": intent_state["confidence"],
-        "planning_strategy": "intent_plan_then_generate",
-        "chosen_tool": execution["chosen_tool"],
-        "chosen_tools": execution["chosen_tools"],
-        "tool_arguments": execution["tool_arguments"],
-        "tool_result": execution["tool_result"],
-        "execution_trace": execution["execution_trace"],
-        "planning": {
-            "intent_reasoning": intent_state["reasoning_summary"],
-            "focus": _build_focus_from_intent(intent_state),
-            "latest_only": intent_state["latest_only"],
-            "candidates": [
-                {
-                    "plan_id": candidate.get("plan_id"),
-                    "confidence": candidate.get("confidence"),
-                    "consensus_score": candidate.get("consensus_score"),
-                    "reasoning_summary": candidate.get("reasoning_summary"),
-                    "tool_sequence": candidate.get("tool_sequence") or _tool_names_from_steps(candidate.get("steps", [])),
-                }
-                for candidate in plan_candidates
-            ],
-            "chosen_plan": chosen_plan,
-            "finish_reasoning": execution["finish_reasoning"],
-        },
-        "answer_confidence": confidence,
-        "confidence_reason": confidence_reason,
-    }

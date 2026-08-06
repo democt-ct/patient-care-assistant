@@ -30,7 +30,7 @@ export function Header({ onToggleSidebar, sidebarOpen }: HeaderProps) {
           <div className="header-brand-icon">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
           </div>
-          <span className="header-brand-name">诊疗助手</span>
+          <span className="header-brand-name">医疗信息导航 Agent</span>
         </div>
       </div>
 
@@ -41,7 +41,7 @@ export function Header({ onToggleSidebar, sidebarOpen }: HeaderProps) {
             <div><strong>{state.selectedPatient.full_name}</strong><span>当前健康档案 · {state.selectedPatient.patient_code}</span></div>
           </>
         ) : (
-          <div><strong>健康工作台</strong><span>在左侧绑定患者，查看个性化健康信息</span></div>
+          <div><strong>医疗信息工作台</strong><span>在左侧绑定患者，核验病历与就诊信息</span></div>
         )}
       </div>
 

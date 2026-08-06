@@ -143,6 +143,11 @@ class MCPAgentQueryResponse(BaseModel):
     triage_level: Optional[str] = Field(default=None, description="Triage level: emergency / urgent / routine")
     escalation_id: Optional[str] = Field(default=None, description="Escalation ID if escalated to human")
     session_state: Optional[str] = Field(default=None, description="Current FSM session state")
+    risk_level: Optional[str] = Field(default=None, description="风险等级：routine / urgent / emergency")
+    next_action: Optional[str] = Field(default=None, description="建议下一步动作")
+    evidence_summary: Optional[str] = Field(default=None, description="依据类型、日期和来源的简短说明")
+    task_route: Optional[Dict[str, Any]] = Field(default=None, description="任务路由结果")
+    citation_report: Optional[Dict[str, Any]] = Field(default=None, description="引用校验报告")
 
 
 class MCPSpeechRequest(BaseModel):

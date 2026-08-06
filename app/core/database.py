@@ -21,7 +21,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 # PostgreSQL configuration
 # Priority: environment variable > default
 PG_HOST = os.getenv("PG_HOST", "localhost")
-PG_PORT = os.getenv("PG_PORT", "5432")
+PG_PORT = os.getenv("PG_PORT", "5433")
 PG_USER = os.getenv("PG_USER", "postgres")
 PG_PASSWORD = os.getenv("PG_PASSWORD", "postgres")
 PG_DATABASE = os.getenv("PG_DATABASE", "patient_agent")

@@ -440,6 +440,12 @@ VISIT_RECORDS = {
 # ============================================================================
 
 def seed():
+    # 新环境自动建表（幂等：只创建缺失的表，不修改已有结构）
+    from app.core.database import Base, engine as app_engine
+    import app.models  # noqa: F401  # 注册全部 ORM 模型
+
+    Base.metadata.create_all(bind=app_engine)
+
     db = SessionLocal()
     try:
         count = db.query(Patient).count()

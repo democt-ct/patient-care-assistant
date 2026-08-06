@@ -12,9 +12,35 @@ from app.schemas.memory_extraction import (
 from app.schemas.memory_preference import MemoryPreferenceRead, MemoryPreferenceUpsert
 from app.schemas.patient import PatientCreate, PatientRead
 from app.schemas.profile import PatientProfileRead
+from app.schemas.retrieval import (
+    AgentOutputContract,
+    EvidenceCheck,
+    EvidenceConflict,
+    EvidenceDecision,
+    EvidenceItem,
+    EvidencePack,
+    EvidenceReviewStatus,
+    EvidenceSource,
+    EvidenceStatus,
+    NextAction,
+    RetrievalRoute,
+    RetrievalSource,
+    RiskLevel,
+    TaskType,
+)
 from app.schemas.visit_record import VisitRecordCreate, VisitRecordRead
 
 __all__ = [
+    "AgentOutputContract",
+    "EvidenceCheck",
+    "EvidenceConflict",
+    "EvidenceDecision",
+    "EvidenceItem",
+    "EvidencePack",
+    "EvidenceReviewStatus",
+    "EvidenceSource",
+    "EvidenceStatus",
+    "NextAction",
     "PatientCreate",
     "PatientRead",
     "MedicalRecordCreate",
@@ -32,4 +58,8 @@ __all__ = [
     "VisitRecordCreate",
     "VisitRecordRead",
     "PatientProfileRead",
+    "RetrievalRoute",
+    "RetrievalSource",
+    "RiskLevel",
+    "TaskType",
 ]

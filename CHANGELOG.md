@@ -1,5 +1,111 @@
 # CHANGELOG — 患者照护助手
 
+## 2026-08-06 — 更新 GitHub 根 README
+
+- 补充独立测试集（29 条）实测结果表：27/29 通过（93.1%）、高风险召回 / 危险建议拦截 / 冲突发现率 100%、不必要拒答率 0%、P95 5.63s，口径链接 `docs/基线报告.md`。
+- 新增危机干预（自伤/自杀 → 12356 心理援助热线 + 120）、药物教育路由说明，以及评估控制台 8 项 MVP 指标口径说明。
+- 测试数量同步为 290 条 pytest + 前端 Vitest 单测。
+
+
+## 2026-08-04 — 评估控制台增加 MVP 指标与口径说明
+
+- 控制台新增「秋招 MVP 指标」区块：路由准确率、高风险召回率、危险建议拦截率、引用正确率、冲突发现率、证据不足正确拒答率、不必要拒答率、P95 延迟共 8 项，客户端按与 `evaluation_service.compute_metrics` 一致的口径实时计算。
+- 每个指标卡片带 `?` 悬停说明，面板底部新增「指标口径」图例列出完整定义；原有综合均分/通过率/意图准确率/关键词覆盖率/安全失败数/平均响应时间卡片补充悬停解释。
+- `runCase` 结果对象补充 `task_route` / `risk_level` / `next_action` / `evidence_check` / `citation_report` 契约字段，供指标计算使用。
+- 指标计算逻辑经 Node 单测验证（高风险召回、路由、引用、冲突、拒答、不必要拒答、P95 全部符合预期）。
+
+
+## 2026-08-04 — 评估控制台修复：全失败与意图未识别
+
+- 修复 `app/static/js/evaluate.js` 的 TDZ 引用错误：`runCase` 在构造 `result` 时引用了尚未初始化的 `score`，导致每条用例抛 `ReferenceError`、全部显示失败且意图为空；改为先构造结果再计算评分。
+- 本地评估限流从 60 提升到 600 次/分钟（`.env`），控制台批量运行不再被 429 拒绝。
+- 控制台新增「RAGAS 评判」开关（默认关闭），批量评估默认跳过额外 LLM 评判调用。
+
+
+## 2026-08-04 — DeepSeek 密钥配置与完整独立测试集实测
+
+- `.env` 配置 DeepSeek 官方密钥（`api.deepseek.com` / `deepseek-chat`，备用 `deepseek-reasoner`），端到端验证健康教育等 LLM 路径正常生成。
+- 完整独立测试集（29 条）实测：27 通过（93.1%），高风险召回率 / 危险建议拦截率 / 冲突发现率 100%，不必要拒答率 0%，路由准确率 95.65%，引用正确率 95.65%，P95 5.63s；确定性路径全部通过。
+- 修正 `general-001` 评估断言为等价措辞（限盐/饮食/血压），general 前缀 4/4 通过。
+- 恢复被并发会话误清空的 `app/mcp/llm_router/pipeline.py`（完整图编排实现）；兼容并发会话新增的 services 包装包与 `agentic_sources.py`，并修正 supplement 测试断言为「仅已审核知识进入默认检索」。
+- 已知待办：`missing-001/003` 证据不足拒答措辞（`apply_hallucination_check` 在空 `tool_result` 下 TypeError 降级）。
+
+
+## 2026-08-04 — Agent 设计与执行计划文档深化
+
+- 扩写 `docs/patient_medical_information_agent_design.md`，新增项目背景、Agent/RAG/Agentic RAG、RetrievalRoute、EvidencePack、证据覆盖率、冲突、引用校验、安全停止、Graph 和输出契约等概念说明。
+- 将架构、路由、EvidencePack、输出字段、安全层次、评估指标、实现映射和局限尽量改为表格，区分概念定义、设计取舍和当前实现状态。
+- 重构 `docs/执行计划.md`，改为项目控制表，明确已完成、待验证、待开发和暂停状态，并增加 P0 工作包、发布门槛、风险清单、推荐执行顺序和 DoD。
+- 同步 `docs/基线报告.md` 与 `docs/项目结构文档.md` 的评估集数字为 47 条（18 dev / 29 test），更新当前核心 Agent 主链状态。
+
+## 2026-08-04 — 工程优化：死代码清理、lint 基线、依赖拆分、前端测试
+
+- 安全补强：新增自伤/自杀危机分支（`CRISIS`），命中即返回全国心理援助热线 12356 + 120 指引，不进入 LLM；新增 `crisis-001` 评估用例与回归测试。
+- 删除 `app/mcp/llm_router.py` 中被 Graph 版本覆盖的 legacy `run_agent_tool_query_stream` 死代码（约 250 行重复实现）。
+- 新增 `ruff.toml` lint 基线（E4/E7/E9/F/I 安全子集），本轮新建/改动文件 ruff 全过；全库历史问题从 1482 降到 195 且可审计。
+- 依赖拆分：重依赖（sentence-transformers / kokoro / misaki / soundfile）移入 `requirements-optional.txt`，核心依赖保持轻量；Dockerfile 安装两份。
+- `scripts/seed_patients.py` 启动时自动建表（幂等 create_all），新环境一步初始化。
+- 前端接入 Vitest：新增 `ChatPanel.test.tsx`（标签映射 + ContractCard 渲染），`npm test` 4 条通过。
+- 文档数字统一：ORM 表数 11→17、测试数 288、评估用例 45（18 dev / 27 test）。
+
+
+## 2026-08-04 — 演示调优：确定性路径全绿 + 人工闭环验证
+
+- 事实核验按子类型拆分路由（紧急联系人 / 就诊医生 / 手术 / 诊断），required_facts 只取本类问题所需字段，消除"查一个医生还要有手术史"的不必要澄清。
+- 用药与过敏核对同样按子类型拆分（过敏查询 / 当前用药 / 个体化决策 / 具体药品用法）；过敏歧义判定仅在问题涉及过敏/头孢/慎用时触发，避免"我吃什么药"被误判冲突。
+- 结构化直答新增就诊日期/科室模板（含"上次发热"匹配"高热"记录）、科室就诊详情合并病历（主诉+诊断+用药）、"磺胺过敏 + 头孢呋辛用药史"双记录核对回答；引用校验修复 `IU` 大小写比较。
+- `run_evaluation.py` 修复个别返回结构缺 `intent` 的崩溃、按患者真实 hospital_id 解析；"不必要拒答率"排除过敏/禁忌/确认类合理安全回答。
+- 照护闭环端到端验证通过：草案 → 医生发布 → 患者确认 → 已知晓 → 逾期升级 → 协调员接手 → 解决（可重复执行脚本）。
+- 确定性评估子集实测：fact 8/8、med 10/10、risk 5/5、conflict 3/3、record 2/2、followup 1/1；路由准确率与引用正确率 100%，高风险召回/危险建议拦截 100%，不必要拒答 0%。
+- 演示脚本与面试文档补充「人工闭环」话术；基线报告回填确定性子集实测数字（LLM 路径待密钥）。
+- 全量 pytest 288 条通过。
+
+
+## 2026-08-04 — docs 目录整理（16 → 11 个文件）
+
+- 合并：`患者过敏安全机制设计.md` → `医疗安全与知识治理.md`（过敏五层防护）；`postgresql_redis_setup.md` → `docker_deployment.md`（PG/Redis 手动安装）；`面试技术文档.md` 精华 → `面试准备-项目知识点.md`（核心亮点 + 高频追问速答 + 深挖方向）。
+- 删除：`docs/README.md`（过时实现说明）、`agent_graph_and_agentic_rag.md`（已被主线设计文档取代）、以及上述三份已合并源文件。
+- 更新：根 README 面试文档链接、`docs/项目结构文档.md` 文档目录树与索引表；`照护计划MVP.md` 保留为扩展模块设计文档。
+
+
+## 2026-08-04 — 修复药物教育的过度拒答
+
+- 任务路由新增「药物教育」优先级：`XX药 + 治什么/作用/副作用/什么时候吃/怎么吃/用法` 等归 `general_health_education`，不再被误归为用药过敏核对。
+- 引用校验对教育性任务跳过证据包匹配：回答可引用证据包之外的药物通用知识，不再被改写为拒答；个体化用药任务仍严格校验。
+- 证据冲突检测改为「同字段、同日期」才判冲突，跨就诊日期的诊断/用药变化不再误报；主档同时出现「过敏 + 慎用」判为需医生确认的边界冲突。
+- 分诊规则补充「晕倒」「昏迷」紧急信号；路由准确率对门禁先行停止的样本按不适用处理（不计入样本）。
+- 新增回归测试：药物教育问题必须回答、不得拒答；个体化剂量问题仍走用药核对与拦截。
+- 评估集新增 `general-003` / `general-004` 两条药物教育用例（独立测试集）。
+
+
+## 2026-08-03 — 患者医疗信息 Agent 主线落地（秋招 MVP）
+
+- 新增 `docs/秋招黄金场景.md`、`docs/秋招演示脚本.md`、`docs/基线报告.md`：固定四个黄金场景与 44 条分层评估用例（17 开发 / 27 独立测试）。
+- 新增 `app/schemas/retrieval.py`：`TaskType` / `RetrievalRoute` / `EvidenceItem` / `EvidencePack` / `EvidenceCheck` / `AgentOutputContract` 的权威定义。
+- 新增 `app/services/retrieval_router.py`（确定性任务路由）、`agentic_retrieval.py`（EvidencePack 组装）、`evidence_policy.py`（充分性/冲突/高风险判定）、`citation_validator.py`（药物/日期/剂量引用校验）。
+- Agent Graph 重排为 `safety → task_route → retrieval → evidence_check → generate/citation_validate → output_assemble`；旧 `chosen_tool` 逻辑封装为执行适配器 `run_agent_execution`，消除重复安全检查和重复结构化路由；补检索最多一次。
+- 所有响应路径统一五段输出契约（answer / evidence_summary / risk_level / next_action / agent_trajectory），SSE done 事件与 MCP query 响应模型同步扩展。
+- 评估体系扩展：`evaluation_service` 新增路由准确率、高风险召回率、危险建议拦截率、引用正确率、冲突发现率、拒答率、不必要拒答率与 P95 延迟；`run_evaluation` 支持 `--split` 并输出指标；评估控制台支持开发集/独立测试集筛选。
+- 前端 ChatPanel 增加任务标签与「依据 / 风险 / 下一步」卡片；结构化直答对「青霉素过敏 + 头孢慎用」冲突场景同时列出两条记录并转医生确认。
+- README 主叙事改为医疗信息 Agent 并补充安全边界与评估指标；面试准备文档补充主线问答与简历描述模板。
+- 全量 pytest 266 条通过，前端 `tsc + vite` 构建通过。
+
+
+## 2026-08-03 — 秋招医疗信息 Agent 主线收敛
+
+- 重写 `docs/patient_medical_information_agent_design.md`，将项目主线收敛为患者医疗信息核验与就医导航 Agent，明确四个黄金演示场景、统一输出链路、EvidencePack、引用校验和安全停止策略。
+- 重写 `docs/执行计划.md`，按“基线 → 证据模型 → 路由重排 → 有限检索 → 评估演示 → 简历材料”重新排序，区分 MVP、可选增强和 Future Work。
+- 明确评估集使用 40～60 条分层虚构用例与独立测试集，指标覆盖路由、安全、引用、冲突、拒答和 P95 延迟，避免使用未经测量的计划值作为简历成果。
+- 将 `docs/项目结构文档.md` 的文档目录同步为当前 Agent 设计与执行计划。
+
+## 2026-08-03 — 运行配置与 SSE 稳定性治理
+
+- PostgreSQL、Redis 默认端口与 Docker 宿主映射统一为 `5433`、`6380`；Redis 增加 1 秒连接/读取超时，并将代码已使用的 `python-dotenv` 补入显式依赖。
+- SSE Agent 调用改在线程中执行，增加 `STREAM_AGENT_TIMEOUT_SECONDS` 超时控制；模型超时或异常时返回安全降级回答，并继续发送 `token` 与 `done` 事件。
+- SSE 协议测试统一隔离外部模型调用，新增异常降级回归测试，避免网络状况导致测试等待与不稳定。
+- 同步项目文档中的 React 版本、测试数量、ORM 表数、MCP 工具数和路由模块数。
+
+
 ## 2026-08-01 — 面试演示入口与 Cloudflare 穿透
 
 - `start_tunnel.bat` 改为面试演示启动入口：自动构建 React 前端、以 `DEMO_MODE=true` 启动虚构病例，并将由 FastAPI 托管的完整界面通过 Cloudflare Tunnel 分享。
@@ -247,3 +353,9 @@
 - HMAC 身份 token
 - PostgreSQL + Redis 迁移（从 SQLite）
 - Docker 部署支持
+## 2026-08-03 - 显式 Agent Graph 第一阶段
+
+- 新增 `app/agent/` 有界执行图，统一节点路由、阶段回调、耗时记录和最大步数保护。
+- `app.mcp.llm_router` 通过兼容包接入确定性医疗安全节点，保留现有 Agent 行为并新增非敏感 `agent_trajectory`。
+- 同步与 SSE 入口共享同一 Graph 包装层；高风险问题在模型初始化前终止。
+- 新增 Agent Graph 单元测试和设计文档 `docs/agent_graph_and_agentic_rag.md`。

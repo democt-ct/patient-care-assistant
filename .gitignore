@@ -13,3 +13,11 @@ app/mcp/local_settings.py
 test.db
 test.db-wal
 test.db-shm
+
+# Local demo database
+data/demo-preview.db
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/

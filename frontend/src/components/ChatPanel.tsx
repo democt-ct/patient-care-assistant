@@ -39,6 +39,7 @@ const WELCOME_PROMPTS = [
 
 const PHASE_LABELS: Record<string, string> = {
   identity: '身份校验',
+  classify: '任务分类',
   context: '加载上下文',
   agent: '回答生成',
   intent: '意图识别',
@@ -49,6 +50,45 @@ const PHASE_LABELS: Record<string, string> = {
   answer: '回答生成',
   tool: '信息查询',
 };
+
+export const TASK_LABELS: Record<string, string> = {
+  fact_verification: '病历事实核验',
+  medication_allergy_check: '用药过敏核对',
+  report_comprehension: '报告理解',
+  longitudinal_comparison: '纵向比较',
+  risk_triage: '风险分流',
+  visit_preparation: '就医准备',
+  general_health_education: '一般健康教育',
+};
+
+export const RISK_LABELS: Record<string, string> = {
+  routine: '常规',
+  urgent: '需关注',
+  emergency: '紧急',
+};
+
+export const ACTION_LABELS: Record<string, string> = {
+  continue_supplement: '补充信息',
+  view_records: '查看记录',
+  contact_doctor: '联系医生',
+  emergency_care: '紧急就医',
+};
+
+export function ContractCard({ message }: { message: ChatMessage }) {
+  const task = typeof message.task_route?.task === 'string' ? message.task_route.task : undefined;
+  const risk = message.risk_level;
+  const next = message.next_action;
+  const evidence = message.evidence_summary;
+  if (!task && !risk && !next && !evidence) return null;
+  return (
+    <div className="contract-card">
+      {task && <span className="contract-chip contract-chip-task">{TASK_LABELS[task] || task}</span>}
+      {risk && <span className={`contract-chip contract-chip-risk ${risk}`}>{RISK_LABELS[risk] || risk}</span>}
+      {next && <span className="contract-chip contract-chip-action">{ACTION_LABELS[next] || next}</span>}
+      {evidence && <div className="contract-evidence">{evidence}</div>}
+    </div>
+  );
+}
 
 function ExecutionSteps({ process }: { process: AgentProcessState }) {
   const [expanded, setExpanded] = useState(false);
@@ -175,6 +215,10 @@ export function ChatPanel() {
           created_at: new Date().toISOString(),
           speech_url: result.speech_url,
           image_analysis: result.image_analysis,
+          risk_level: result.risk_level,
+          next_action: result.next_action,
+          evidence_summary: result.evidence_summary,
+          task_route: result.task_route,
           process: {
             phases: [
               { phase: 'image_analysis', message: '已完成图片内容分析', status: 'done' },
@@ -274,6 +318,10 @@ export function ChatPanel() {
                 created_at: new Date().toISOString(),
                 speech_url: data.speech_text ? undefined : undefined,
                 process: completedProcess,
+                risk_level: data.risk_level,
+                next_action: data.next_action,
+                evidence_summary: data.evidence_summary,
+                task_route: data.task_route,
               };
               addMessage(assistantMsg);
               dispatch({ type: 'SET_LAST_ANSWER', payload: finalAnswer });
@@ -482,6 +530,8 @@ export function ChatPanel() {
                       ))
                     )}
                   </div>
+
+                  {msg.role === 'assistant' && <ContractCard message={msg} />}
 
                   {msg.role === 'assistant' && msg.process && (
                     <ExecutionSteps process={msg.process} />

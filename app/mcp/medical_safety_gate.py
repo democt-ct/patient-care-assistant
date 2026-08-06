@@ -18,6 +18,7 @@ class SafetyGateAction(str, Enum):
     ALLOW = "allow"
     EMERGENCY = "emergency"
     CLINICIAN_REVIEW = "clinician_review"
+    CRISIS = "crisis"
 
 
 @dataclass(frozen=True)
@@ -43,12 +44,24 @@ _CLINICAL_DECISION_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"(?:给我开|开个|处方|推荐.*(?:药|治疗)|用什么药)", "treatment_recommendation"),
 )
 
+# 自伤/自杀危机信号：不进入自由生成，直接给危机干预指引。
+_CRISIS_PATTERNS: tuple[str, ...] = (
+    r"自杀|自伤|割腕|轻生|不想活|不想活了|伤害自己|结束生命|活不下去|想死",
+)
+
 
 def evaluate_medical_safety(question: str) -> SafetyGateDecision:
     """Classify only the cases that must not reach free-form generation."""
     text = (question or "").strip()
     if not text:
         return SafetyGateDecision(SafetyGateAction.ALLOW)
+
+    if any(re.search(pattern, text, re.IGNORECASE) for pattern in _CRISIS_PATTERNS):
+        return SafetyGateDecision(
+            SafetyGateAction.CRISIS,
+            reason="self_harm_crisis",
+            detected_signals=("self_harm",),
+        )
 
     triage_result = triage(text)
     if triage_result.level is TriageLevel.EMERGENCY:
@@ -72,6 +85,12 @@ def evaluate_medical_safety(question: str) -> SafetyGateDecision:
 
 def format_safety_gate_response(decision: SafetyGateDecision) -> str:
     """Return a non-diagnostic, actionable response without LLM generation."""
+    if decision.action is SafetyGateAction.CRISIS:
+        return (
+            "你的描述让我很担心。请先确保自己当下的安全：联系信任的家人或朋友陪在你身边，"
+            "或拨打全国心理援助热线 12356（24 小时）。如果你已经伤害自己或身边有立即的危险，"
+            "请马上拨打 120 或前往最近的急诊。你不需要独自面对，有人可以帮你。"
+        )
     if decision.action is SafetyGateAction.EMERGENCY:
         return (
             "你描述的情况可能需要紧急医疗评估。请立即拨打 120 或前往最近的急诊，"

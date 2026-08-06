@@ -298,3 +298,42 @@ docker-compose up -d
 docker-compose up -d --scale app=0
 docker-compose up -d app=previous-version
 ```
+
+---
+
+## PostgreSQL 与 Redis 手动安装
+
+> 原「postgresql_redis_setup.md」，2026-08-04 并入本文。Docker Compose 是推荐方式，以下为无 Docker 环境的手动安装路径。
+
+### 快速开始（脚本方式）
+
+```bash
+python scripts/setup_services.py start    # 启动服务
+python scripts/setup_services.py status   # 查看状态
+python scripts/setup_services.py stop     # 停止服务
+```
+
+### 手动安装
+
+1. 安装 PostgreSQL 15+，创建数据库：`CREATE DATABASE patient_agent;`
+2. 安装 Redis 7+ 并启动服务。
+3. 配置连接：优先环境变量（`PG_HOST` / `PG_PORT` / `PG_USER` / `PG_PASSWORD` / `PG_DATABASE`，`REDIS_HOST` / `REDIS_PORT` / `REDIS_DB` / `REDIS_PASSWORD`，或 `REDIS_URL`），或复制 `app/config/local_settings.example.py` 为 `app/config/local_settings.py` 填写。
+4. 初始化数据库：`python scripts/init_postgres.py`（创建数据库与全部表）。
+
+### 验证
+
+```bash
+python -c "import psycopg2; conn = psycopg2.connect(host='localhost', dbname='patient_agent'); print('PostgreSQL OK')"
+python -c "import redis; r = redis.Redis(); r.ping(); print('Redis OK')"
+```
+
+### 从 SQLite 迁移到 PostgreSQL
+
+1. 导出 SQLite 数据 → 2. 转换格式 → 3. 导入 PostgreSQL。迁移脚本见项目 Git 历史中的 `scripts/migrate_sqlite_to_pg.py`（如需要）。
+
+### 生产环境注意事项
+
+- 安全性：修改默认密码、配置防火墙、使用 SSL。
+- 性能：调整 PG 连接池、配置 Redis 持久化（RDB/AOF）。
+- 备份：定期 `pg_dump` 备份；Redis `BGSAVE`。
+- 高可用：PG 主从复制、Redis Sentinel/Cluster。

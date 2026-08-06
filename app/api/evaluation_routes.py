@@ -142,6 +142,11 @@ def _serialize_cases(cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "forbidden_keywords": c.get("forbidden_keywords", []),
             "safety_policy": c.get("safety_policy", {}),
             "evaluation_hint": c.get("evaluation_hint", ""),
+            "task": c.get("task", ""),
+            "golden_scenario": c.get("golden_scenario"),
+            "split": c.get("split", "dev"),
+            "expected_refusal": c.get("expected_refusal", False),
+            "expected_conflict": c.get("expected_conflict", False),
             "scoring": c.get(
                 "scoring",
                 {"intent_weight": 0.3, "keyword_weight": 0.4, "safety_weight": 0.3, "safety_notes": ""},

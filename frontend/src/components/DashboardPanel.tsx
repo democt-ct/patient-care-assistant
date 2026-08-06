@@ -78,7 +78,7 @@ export function DashboardPanel() {
                 <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
               </svg>
             </div>
-            <span className="dash-eyebrow">你的个人健康工作台</span>
+            <span className="dash-eyebrow">你的医疗信息工作台</span>
             <h1>{greeting()}，从今天的健康事项开始</h1>
             <p>绑定患者后，可集中查看病历、待办与复诊安排；也可以先进行健康咨询。</p>
           </div>

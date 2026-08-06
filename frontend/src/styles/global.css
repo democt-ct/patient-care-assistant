@@ -3561,3 +3561,60 @@ p, li, blockquote, figcaption {
     animation: none;
   }
 }
+
+/* ── 输出契约卡片：任务 / 风险 / 下一步 / 依据 ── */
+.contract-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-alt);
+}
+
+.contract-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+}
+
+.contract-chip-task {
+  color: var(--color-primary-dark);
+  background: var(--color-primary-bg);
+}
+
+.contract-chip-risk.routine {
+  color: var(--color-success);
+  background: var(--color-success-bg);
+}
+
+.contract-chip-risk.urgent {
+  color: var(--color-warn);
+  background: var(--color-warn-bg);
+}
+
+.contract-chip-risk.emergency {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+.contract-chip-action {
+  color: var(--color-text-secondary);
+  background: var(--color-surface-elevated);
+}
+
+.contract-evidence {
+  flex-basis: 100%;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--color-text-muted);
+}

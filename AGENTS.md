@@ -18,17 +18,17 @@
 | `app/api/` | HTTP 路由层（患者 CRUD、Agent、记忆、SSE 流式） |
 | `app/core/` | 基础设施（PG 连接、Redis、调度器、结构化日志、Prometheus 指标、OTel 追踪） |
 | `app/middleware/` | 安全中间件（访问控制、速率限制） |
-| `app/mcp/` | 自研 MCP 工具层（5 工具 + LLM 编排 + 视觉 + TTS） |
-| `app/models/` | SQLAlchemy ORM（11 张表） |
+| `app/mcp/` | 自研 MCP 工具层（6 工具 + LLM 编排 + 视觉 + TTS） |
+| `app/models/` | SQLAlchemy ORM（17 张表） |
 | `app/services/` | 业务服务（RAG 检索、记忆抽取、偏好管理、服务端评估评分） |
 | `app/schemas/` | Pydantic 请求/响应 Schema |
 | `app/static/` | 旧版前端 + 质量评估控制台（`evaluate.html` + `css/` + `js/`） |
 | `app/config/` | 配置层（`production.py`、`local_settings.py`、`evaluation_cases.py`） |
-| `frontend/` | ★ 新版前端（React 18 + TypeScript + Vite） |
+| `frontend/` | ★ 新版前端（React 19 + TypeScript + Vite） |
 | `data/chroma_knowledge/` | ChromaDB 向量库 |
 | `docs/` | 项目文档 |
 | `scripts/` | 工具脚本（批量导入、质量评估、种子数据） |
-| `tests/` | pytest 测试（131 个） |
+| `tests/` | pytest 测试（290 个） |
 | `docker-compose.yml` | PostgreSQL 15 (:5433) + Redis 7 (:6380) |
 | `start_dev.bat` | 本地一键启动 |
 
@@ -44,7 +44,7 @@
 | **Docker 服务** | `docker compose up -d` | 启动 PostgreSQL(:5433) 与 Redis(:6380) |
 | **前端开发** | `cd frontend && npm run dev` | :3000 代理到 :8001 |
 | **内网穿透** | 双击 `start_tunnel.bat` | 一键后端 + Cloudflare 隧道 |
-| **质量评估** | `python scripts/run_evaluation.py --verbose` | 运行 15 条质量评估用例（用例数据源在 `app/config/evaluation_cases.py`） |
+| **质量评估** | `python scripts/run_evaluation.py --split test --verbose` | 运行 47 条分层评估用例（18 开发 / 29 独立测试；用例数据源在 `app/config/evaluation_cases.py`） |
 
 访问：
 - `http://localhost:3000` — React 前端（聊天 + 记忆 + Debug）
@@ -74,6 +74,7 @@
 | `PATIENT_FACT_EMBEDDING_ENABLED` | false | 患者结构化事实的向量排序开关；默认使用关键词排序，避免首问加载模型 |
 | `SCHEDULER_ENABLED` | false | 后台定时任务 |
 | `TTS_PROVIDER` | kokoro | TTS 引擎 |
+| `STREAM_AGENT_TIMEOUT_SECONDS` | 20 | SSE Agent 后端调用超时秒数；超时后返回安全降级回答 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | 未设置 | 可选 OTLP Collector 地址；设置后导出 Agent spans 到兼容的链路后端 |
 
 ---

@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 from typing import Any, Optional
 
@@ -6,7 +6,7 @@ import redis
 
 # Redis configuration
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6380"))
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
 REDIS_URL = os.getenv("REDIS_URL", None)
@@ -25,7 +25,12 @@ def get_redis_client() -> redis.Redis:
         return _redis_client
     
     if REDIS_URL:
-        _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+        _redis_client = redis.from_url(
+            REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=1.0,
+            socket_timeout=1.0,
+        )
     else:
         _redis_client = redis.Redis(
             host=REDIS_HOST,
@@ -33,12 +38,14 @@ def get_redis_client() -> redis.Redis:
             db=REDIS_DB,
             password=REDIS_PASSWORD,
             decode_responses=True,
+            socket_connect_timeout=1.0,
+            socket_timeout=1.0,
         )
     
     # Test connection
     try:
         _redis_client.ping()
-    except redis.ConnectionError:
+    except redis.RedisError:
         # If Redis is not available, create a mock client that does nothing
         _redis_client = _MockRedisClient()
     

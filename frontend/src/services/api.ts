@@ -248,6 +248,11 @@ export const agentApi = {
         session_id?: string;
         patient_id?: string;
         memory_debug?: MemoryDebugPayload;
+        risk_level?: string;
+        next_action?: string;
+        evidence_summary?: string;
+        task_route?: Record<string, unknown>;
+        citation_report?: Record<string, unknown>;
       }) => void;
       onError?: (detail: string) => void;
     },

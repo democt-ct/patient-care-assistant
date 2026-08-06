@@ -1,6 +1,6 @@
 # 患者照护助手 — 前端
 
-> React 18 + TypeScript + Vite 前端，通过代理连接后端 FastAPI 服务。
+> React 19 + TypeScript + Vite 前端，通过代理连接后端 FastAPI 服务。
 
 ---
 

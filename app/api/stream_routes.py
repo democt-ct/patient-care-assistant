@@ -5,7 +5,9 @@ SSE 流式响应端点 —— 为 Agent 问答提供打字机效果。
 通过 Server-Sent Events 流式返回，包含阶段状态和文本逐块输出。
 """
 
+import asyncio
 import json
+import os
 import time
 from typing import AsyncGenerator
 
@@ -14,13 +16,13 @@ from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
 from app.api.mcp_routes import (
-    _resolve_bound_identity,
-    _build_long_term_memory_context,
+    SHORT_TERM_ROUND_LIMIT,
     _build_knowledge_context_block,
+    _build_long_term_memory_context,
+    _build_memory_debug_payload,
     _merge_conversation_contexts,
     _render_short_term_memory_context,
-    _build_memory_debug_payload,
-    SHORT_TERM_ROUND_LIMIT,
+    _resolve_bound_identity,
 )
 from app.core.database import get_db
 from app.core.redis_client import (
@@ -35,10 +37,22 @@ from app.mcp.schemas import (
 )
 from app.services.memory_extraction_service import (
     create_conversation_message,
-    create_session_buffer_message,
 )
 
 router = APIRouter(prefix="/api/v1/mcp/agent", tags=["智能问答与工具（mcp-server）"])
+
+STREAM_AGENT_TIMEOUT_SECONDS = float(os.getenv("STREAM_AGENT_TIMEOUT_SECONDS", "20"))
+
+
+def _fallback_stream_result(question: str) -> dict:
+    answer = "当前智能问答服务暂时不可用，请稍后重试。若涉及胸痛、呼吸困难等紧急症状，请立即联系急救服务。"
+    return {
+        "question": question,
+        "answer": answer,
+        "speech_text": answer,
+        "intent": "service_unavailable",
+        "chosen_tool": "service_fallback",
+    }
 
 
 def _sse_event(event_type: str, data: dict) -> str:
@@ -70,8 +84,8 @@ async def _agent_stream_generator(
         )
         if resolved_pid:
             patient_id, hospital_id = resolved_pid, resolved_hid
-    except Exception as exc:
-        yield _sse_event("error", {"detail": f"身份验证失败"})
+    except Exception:
+        yield _sse_event("error", {"detail": "身份验证失败"})
         return
 
     # ── Phase 2: Load context ──
@@ -110,19 +124,26 @@ async def _agent_stream_generator(
         _pending_events.append(("phase", {"phase": phase, "message": message}))
 
     try:
-        result = run_agent_tool_query_stream(
-            question=question,
-            on_phase=_phase_callback,
-            auth_token=auth_token,
-            patient_id=patient_id,
-            hospital_id=hospital_id,
-            chat_mode=chat_mode,
-            conversation_context=conversation_context,
-            risk_signals=risk_signals,
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                run_agent_tool_query_stream,
+                question=question,
+                on_phase=_phase_callback,
+                auth_token=auth_token,
+                patient_id=patient_id,
+                hospital_id=hospital_id,
+                chat_mode=chat_mode,
+                conversation_context=conversation_context,
+                risk_signals=risk_signals,
+            ),
+            timeout=STREAM_AGENT_TIMEOUT_SECONDS,
         )
-    except Exception as exc:
-        yield _sse_event("error", {"detail": f"处理失败: {exc}"})
-        return
+    except asyncio.TimeoutError:
+        yield _sse_event("error", {"detail": "智能问答服务响应超时，已返回安全降级提示"})
+        result = _fallback_stream_result(question)
+    except Exception:
+        yield _sse_event("error", {"detail": "智能问答服务暂时不可用，已返回安全降级提示"})
+        result = _fallback_stream_result(question)
 
     # Yield buffered phase events
     for event_type, data in _pending_events:
@@ -182,9 +203,15 @@ async def _agent_stream_generator(
         "answer": answer,
         "speech_text": result.get("speech_text", ""),
         "intent": result.get("intent", ""),
+        "intent_confidence": result.get("intent_confidence"),
         "chosen_tool": result.get("chosen_tool", ""),
         "session_id": session_id,
         "patient_id": patient_id,
+        "risk_level": result.get("risk_level", "routine"),
+        "next_action": result.get("next_action", "view_records"),
+        "evidence_summary": result.get("evidence_summary", ""),
+        "task_route": result.get("task_route"),
+        "citation_report": result.get("citation_report"),
     }
     if memory_debug:
         done_data["memory_debug"] = memory_debug

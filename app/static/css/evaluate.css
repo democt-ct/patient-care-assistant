@@ -182,6 +182,45 @@ input[type="text"]:focus { outline: none; border-color: var(--accent); }
 .reason-box.pass { background: rgba(34,197,94,.08); border: 1px solid rgba(34,197,94,.2); color: var(--green); }
 .reason-box.fail { background: rgba(239,68,68,.08); border: 1px solid rgba(239,68,68,.2); color: var(--red); }
 
+/* ── 秋招 MVP 指标区 ── */
+.mvp-section-title {
+  grid-column: 1 / -1;
+  margin-top: 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  border-top: 1px dashed var(--border, rgba(148,163,184,.3));
+  padding-top: 12px;
+}
+.metric-hint { font-size: 11px; font-weight: 400; color: var(--text-dim); }
+.metric-def {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px; height: 14px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: rgba(14,165,233,.15);
+  color: var(--blue, #38bdf8);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: help;
+  vertical-align: middle;
+}
+.mvp-legend {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(148,163,184,.2);
+  border-radius: 8px;
+  background: var(--surface2);
+  text-align: left;
+}
+.mvp-legend-title { font-size: 11px; font-weight: 700; color: var(--text-dim); margin-bottom: 6px; }
+.mvp-legend ul { margin: 0; padding-left: 16px; }
+.mvp-legend li { font-size: 11px; line-height: 1.7; color: var(--text-dim); }
+.mvp-legend li strong { color: var(--text); }
+
 @media (max-width: 900px) {
   .table-header, .table-row { grid-template-columns: 70px 1fr 90px 60px 50px; }
   .table-header span:nth-child(5), .table-header span:nth-child(6), .table-header span:nth-child(7),

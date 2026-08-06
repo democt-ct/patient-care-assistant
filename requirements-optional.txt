@@ -1,0 +1,8 @@
+# 可选重依赖（懒加载，不安装不影响核心问答与测试）：
+# - 本地向量嵌入模型（sentence-transformers）
+# - 本地 TTS（Kokoro）
+
+sentence-transformers>=3.0.0
+kokoro
+misaki[zh]
+soundfile
