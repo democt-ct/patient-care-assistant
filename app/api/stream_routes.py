@@ -133,6 +133,7 @@ async def _agent_stream_generator(
                 patient_id=patient_id,
                 hospital_id=hospital_id,
                 chat_mode=chat_mode,
+                session_id=session_id,
                 conversation_context=conversation_context,
                 risk_signals=risk_signals,
             ),

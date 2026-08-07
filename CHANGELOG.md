@@ -1,5 +1,12 @@
 # CHANGELOG — 患者照护助手
 
+## 2026-08-07 — V2 阶段 2：澄清闭环（模糊主诉追问问卷 + 会话状态机）
+
+- 新增 `app/services/clarification.py`：非强信号模糊主诉（胸闷/头晕/乏力/恶心等）进入结构化追问问卷（性质/部位/持续时间/伴随症状/危险因素），完成后追加「是否缓解」追问；未缓解或无法判断时保守升级为就医指引（risk_level=urgent）。
+- 会话状态机：`ClarificationState` + `ClarificationStore`（Redis 优先、内存兜底，TTL 1 小时），澄清进度跨轮次记忆；强信号仍由安全门禁先行短路，澄清不改变安全红线判定。
+- Graph 新增 `clarify` 节点：`task_route` 在模糊主诉或存在进行中澄清状态时转入；非模糊问题路径不变（既有轨迹断言兼容）。
+- API 层传递 `session_id`：`mcp_routes.py` 与 `stream_routes.py` 的 Agent 调用均携带会话标识。
+- 新增 `tests/test_clarification.py`（状态机推进、缓解判定、存储往返、启动/推进/升级/缓解/跳过路径）；全量 pytest 310 条通过。
 ## 2026-08-07 — V2 阶段 1：证据双轨（LLM 证据法官 + 确定性兜底）
 
 - 新增 `app/services/evidence_judge.py`：LLM 证据法官对「证据是否充分支撑回答」「未被规则捕获的语义冲突」「关键论断是否有证据支持」输出结构化 verdict（supported / unsupported / conflict / insufficient）与 claim → evidence_id 绑定。

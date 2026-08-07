@@ -1583,6 +1583,7 @@ def mcp_agent_query(payload: MCPAgentQueryRequest, db: Session = Depends(get_db)
                 patient_id=resolved_patient_id,
                 hospital_id=resolved_hospital_id,
                 chat_mode=chat_mode,
+                session_id=session_id,
                 conversation_context=conversation_context,
                 allergy_drugs=allergy_drugs,
                 allergy_history_unknown=allergy_history_unknown,

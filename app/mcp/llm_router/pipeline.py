@@ -12,12 +12,26 @@ from app.schemas.retrieval import (
     EvidenceJudgeVerdict,
     EvidencePack,
     EvidenceStatus,
+    NextAction,
     RetrievalRoute,
+    RiskLevel,
     TaskType,
 )
 from app.services.agentic_retrieval import build_evidence_pack_from_structured_result
 from app.services.citation_validator import validate_answer
 from app.services.evidence_judge import judge_evidence
+from app.services.clarification import (
+    QUESTION_FLOW,
+    RELIEF_QUESTION,
+    UPGRADE_GUIDANCE,
+    apply_answer,
+    classify_relief,
+    classify_vague_symptom,
+    get_clarification_store,
+    new_state,
+    next_prompt,
+)
+
 from app.services.evidence_policy import evaluate_evidence
 from app.services.retrieval_router import route_question
 
@@ -95,7 +109,110 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
         route = route_question(state.context["question"])
         state.context["route"] = route
         state.note(f"task:{route.task.value}:{route.route_reason}")
+        # V2 澄清闭环：模糊主诉或存在进行中的追问状态时进入澄清节点
+        session_id = state.context.get("session_id")
+        has_active_clarification = bool(session_id) and get_clarification_store().get(session_id) is not None
+        if classify_vague_symptom(state.context.get("question", "")) or has_active_clarification:
+            return "clarify"
         return "retrieval"
+
+    def _set_clarify_result(
+        state: AgentGraphState,
+        answer: str,
+        *,
+        step: int,
+        completed: bool,
+        upgraded: bool = False,
+    ) -> None:
+        result = state.context.setdefault("candidate_result", {})
+        result.update(
+            {
+                "answer": answer,
+                "intent": "clarification",
+                "chosen_tool": "clarification_flow",
+                "clarification_required": True,
+                "clarification_completed": completed,
+                "clarification_upgraded": upgraded,
+                "clarification_step": step,
+            }
+        )
+        assemble_output_contract(result)
+        result["evidence_summary"] = "该回答为症状澄清追问，未使用病历数据。"
+        if not upgraded:
+            result["next_action"] = NextAction.CONTINUE_SUPPLEMENT.value
+            result["risk_level"] = RiskLevel.ROUTINE.value
+        state.result = result
+
+    def clarify_node(state: AgentGraphState) -> Optional[str]:
+        question = state.context.get("question", "")
+        session_id = state.context.get("session_id")
+        store = get_clarification_store()
+        record = store.get(session_id) if session_id else None
+
+        # 首次进入：确认为模糊主诉后创建问卷并抛出第一个问题
+        if record is None:
+            if not classify_vague_symptom(question):
+                return "retrieval"
+            record = new_state(session_id, question)
+            store.set(record)
+            _set_clarify_result(
+                state,
+                next_prompt(record) or RELIEF_QUESTION,
+                step=record.step_index,
+                completed=False,
+            )
+            state.note("clarify:started")
+            return None
+
+        # 问卷进行中：把当前消息当作上一题的答案并推进
+        if not record.completed_questionnaire():
+            prompt = apply_answer(record, question)
+            if prompt is None:
+                record.relief_asked = True
+                store.set(record)
+                _set_clarify_result(state, RELIEF_QUESTION, step=record.step_index, completed=False)
+            else:
+                store.set(record)
+                _set_clarify_result(state, prompt, step=record.step_index, completed=False)
+            state.note(f"clarify:step{record.step_index}")
+            return None
+
+        # 问卷完成：等待「是否缓解」答复
+        relief = classify_relief(question)
+        store.clear(session_id)
+        if relief is False:
+            _set_clarify_result(
+                state,
+                UPGRADE_GUIDANCE,
+                step=len(QUESTION_FLOW),
+                completed=True,
+                upgraded=True,
+            )
+            state.result["risk_level"] = RiskLevel.URGENT.value
+            state.result["next_action"] = NextAction.CONTACT_DOCTOR.value
+            state.note("clarify:upgraded")
+            return None
+        if relief is True:
+            _set_clarify_result(
+                state,
+                "好的，如果症状反复或加重，请及时就医或再次联系。",
+                step=len(QUESTION_FLOW),
+                completed=True,
+            )
+            state.note("clarify:relieved")
+            return None
+        # 无法判断是否缓解：保守升级为就医指引
+        _set_clarify_result(
+            state,
+            UPGRADE_GUIDANCE,
+            step=len(QUESTION_FLOW),
+            completed=True,
+            upgraded=True,
+        )
+        state.result["risk_level"] = RiskLevel.URGENT.value
+        state.result["next_action"] = NextAction.CONTACT_DOCTOR.value
+        state.note("clarify:unclear_upgraded")
+        return None
 
     def retrieval_node(state: AgentGraphState) -> Optional[str]:
         context = state.context
@@ -258,6 +375,7 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
     graph = AgentGraph(entrypoint="safety", max_steps=10)
     graph.add_node(AgentNode("safety", "safety", "正在执行医疗安全检查...", safety_node))
     graph.add_node(AgentNode("task_route", "classify", "正在识别任务类型与检索来源...", task_route_node))
+    graph.add_node(AgentNode("clarify", "clarify", "正在追问症状细节...", clarify_node))
     graph.add_node(AgentNode("retrieval", "context", "正在检查结构化病历事实...", retrieval_node))
     graph.add_node(AgentNode("generate", "agent", "正在执行受控 Agent 流程...", generate_node))
     graph.add_node(AgentNode("evidence_check", "evidence", "正在检查证据充分性...", evidence_check_node))
@@ -284,6 +402,7 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
             "allergy_history_unknown": kwargs.get("allergy_history_unknown", False),
             "risk_signals": kwargs.get("risk_signals"),
             "judge_llm": kwargs.get("judge_llm"),
+            "session_id": kwargs.get("session_id"),
         }
 
     def run_graph(question: str, *, on_phase=None, **kwargs: Any) -> dict[str, Any]:
