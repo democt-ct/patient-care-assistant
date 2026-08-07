@@ -34,6 +34,7 @@ from app.services.clarification import (
 )
 
 from app.services.evidence_policy import evaluate_evidence
+from app.services.response_guidance import embed_escalation_guidance, personalize_response
 from app.services.retrieval_router import route_question
 
 
@@ -370,6 +371,26 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
         if pack is not None:
             result["evidence_coverage"] = pack.coverage
         assemble_output_contract(result)
+        # V2 阶段 4：普通风险症状在正常回答中内嵌升级指引（不强信号不拦截）
+        if result.get("risk_level") == RiskLevel.ROUTINE.value:
+            guided, escalated = embed_escalation_guidance(
+                result.get("answer", ""),
+                state.context.get("question", ""),
+            )
+            if escalated == RiskLevel.URGENT.value:
+                result["answer"] = guided
+                result["risk_level"] = RiskLevel.URGENT.value
+        # V2 阶段 6：患者偏好个性化（回答长度/术语/风险提醒强度）
+        prefs = state.context.get("personalization") or {}
+        if prefs:
+            text, applied = personalize_response(
+                result.get("answer", ""),
+                risk_level=result.get("risk_level", RiskLevel.ROUTINE.value),
+                preferences=prefs,
+            )
+            if applied.get("personalized"):
+                result["answer"] = text
+                result["personalization_applied"] = applied
         # 回答明确要求“医生/药师确认”时，下一步应为联系医生，而非查看记录
         if (
             route is not None
@@ -413,6 +434,7 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
             "risk_signals": kwargs.get("risk_signals"),
             "judge_llm": kwargs.get("judge_llm"),
             "session_id": kwargs.get("session_id"),
+            "personalization": kwargs.get("personalization"),
         }
 
     def run_graph(question: str, *, on_phase=None, **kwargs: Any) -> dict[str, Any]:

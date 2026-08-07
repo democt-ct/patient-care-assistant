@@ -1,5 +1,10 @@
 # CHANGELOG — 患者照护助手
 
+## 2026-08-07 — V2 阶段 4+5：安全红线收敛 + 引用安全网增强
+
+- 安全红线收敛：确定性短路保留强信号（自伤/自杀危机、明确高危组合）；普通风险症状（疼痛/发麻/麻木/不适等）不再硬拦截，新增 `app/services/response_guidance.py` 的 `embed_escalation_guidance`，在正常回答末尾自然内嵌「如果症状剧烈、伴大汗、呼吸困难或意识异常，请立即拨打 120 或前往急诊」并把 risk_level 标为 urgent。
+- 引用安全网：阶段 1 的 claim → evidence_id 绑定在 `citation_validate` 节点生效（绑定证据缺失或 verdict=unsupported 直接标记），高危任务校验失败仍覆盖为「当前记录无法支持该结论，请以医生/药师为准」；输出契约新增可选 `claim_bindings` 字段（兼容五段契约）。
+- 新增 `tests/test_response_guidance.py`（嵌入/幂等/管线级升级指引）；全量 pytest 318 条通过。
 ## 2026-08-07 — V2 阶段 3：规则手册知识化 + LLM 分类器路由兜底
 
 - 新增 `app/config/rulebook_knowledge.py`：把 7 类任务的「处理规范/话术/升级指引」整理为已审核知识块（review_status=approved，source 走 `hospital_approved_content` 注册源），`rulebook_context_for(route)` 按路由任务确定性检索并注入系统提示词（「以下是从规则手册检索到的处理规范，请严格遵守」「以下是从患者档案检索到的患者事实，仅用于核验，不得编造」）。
