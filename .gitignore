@@ -21,3 +21,6 @@ data/demo-preview.db
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Local pytest tmp redirect (sandbox)
+.tmp-test/

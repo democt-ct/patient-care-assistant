@@ -125,6 +125,34 @@ class EvidenceStatus(str, Enum):
     HIGH_RISK = "high_risk"
 
 
+class EvidenceJudgeVerdict(str, Enum):
+    """LLM 证据法官（Evidence Judge）的判定结论（V2 双轨智能层）。"""
+
+    SUPPORTED = "supported"
+    UNSUPPORTED = "unsupported"
+    CONFLICT = "conflict"
+    INSUFFICIENT = "insufficient"
+
+
+class ClaimBinding(BaseModel):
+    """回答中关键论断与证据的显式绑定（claim → evidence_id）。"""
+
+    claim: str = Field(..., description="论断摘要（回答派生，不含病历原文）")
+    evidence_ids: list[str] = Field(default_factory=list, description="支持该论断的证据 ID")
+    verdict: EvidenceJudgeVerdict = Field(..., description="该论断是否被证据支持")
+    note: str = Field(default="", description="绑定说明（可选）")
+
+
+class EvidenceJudgeResult(BaseModel):
+    """LLM 证据法官的结构化判定结果；LLM 不可用时由确定性层兜底。"""
+
+    verdict: EvidenceJudgeVerdict = Field(..., description="总体判定")
+    claim_bindings: list[ClaimBinding] = Field(default_factory=list, description="论断→证据绑定")
+    reason: str = Field(default="", description="判定摘要（不含患者隐私）")
+    judge_source: str = Field(default="llm", description="llm / deterministic")
+    model_version: str = Field(default="", description="判定模型版本")
+
+
 class EvidenceDecision(str, Enum):
     """证据判定后的下一步决策。"""
 
@@ -145,6 +173,8 @@ class EvidenceCheck(BaseModel):
     decision: EvidenceDecision = Field(..., description="下一步决策")
     attempt: int = Field(default=1, ge=1, description="当前检索轮次")
     max_attempts: int = Field(default=1, ge=1, le=2, description="允许的最大检索轮次")
+    judge: Optional[EvidenceJudgeResult] = Field(None, description="LLM 证据法官判定（双轨智能层）")
+    verdict_source: str = Field(default="deterministic", description="判定来源：llm / deterministic / hybrid")
 
 
 class RiskLevel(str, Enum):

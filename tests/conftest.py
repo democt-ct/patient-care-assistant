@@ -20,6 +20,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ── Set test environment BEFORE importing any app modules ──
 os.environ["TESTING"] = "true"
+# V2 双轨/分类器开关：测试默认关闭 LLM 判定与 LLM 分类器，保持确定性离线行为
+os.environ["EVIDENCE_JUDGE_ENABLED"] = "false"
+os.environ["LLM_CLASSIFIER_ENABLED"] = "false"
 # Use file-based SQLite so the app engine (used by TestClient API tests)
 # and the test engine (used by db_session unit tests) share the same database.
 # In-memory SQLite gives each engine its own database, breaking cross-engine queries.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
-from typing import Optional
+from typing import Any, Optional
 
 _legacy_path = Path(__file__).resolve().parent.parent / "citation_validator.py"
 exec(compile(_legacy_path.read_bytes(), str(_legacy_path), "exec"), globals(), globals())
@@ -17,8 +17,14 @@ _MEDICAL_ENTITY_RE = re.compile(
 )
 
 
-def validate_answer(answer: str, pack: EvidencePack, *, task: Optional[str] = None) -> CitationReport:
-    report = _legacy_validate_answer(answer, pack, task=task)
+def validate_answer(
+    answer: str,
+    pack: EvidencePack,
+    *,
+    task: Optional[str] = None,
+    claim_bindings: Optional[list[dict[str, Any]]] = None,
+) -> CitationReport:
+    report = _legacy_validate_answer(answer, pack, task=task, claim_bindings=claim_bindings)
     if not answer or task == "general_health_education":
         return report
     pack_text = _pack_text(pack)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from app.schemas.retrieval import EvidencePack
 
@@ -50,6 +50,7 @@ def validate_answer(
     pack: EvidencePack,
     *,
     task: Optional[str] = None,
+    claim_bindings: Optional[list[dict[str, Any]]] = None,
 ) -> CitationReport:
     """校验回答中的药物实体、日期和剂量是否被证据包支持。
 
@@ -64,6 +65,24 @@ def validate_answer(
         # 非个体化教育：不校验药物/剂量/日期是否在患者证据包中。
         return report
     pack_text = _pack_text(pack)
+
+    # V2：显式 claim → evidence_id 绑定优先校验（LLM 证据法官产物）
+    if claim_bindings:
+        pack_ids = {item.evidence_id for item in pack.items}
+        for binding in claim_bindings:
+            claim = str(binding.get("claim") or "").strip()
+            if not claim:
+                continue
+            binding_verdict = str(binding.get("verdict") or "").strip().lower()
+            evidence_ids = [str(eid) for eid in (binding.get("evidence_ids") or [])]
+            if binding_verdict == "unsupported":
+                report.unsupported_claims.append(claim[:120])
+            elif evidence_ids:
+                missing_ids = [eid for eid in evidence_ids if eid not in pack_ids]
+                if missing_ids:
+                    report.unsupported_claims.append(f"{claim[:60]}（绑定证据缺失）")
+                else:
+                    report.supported_claims.append(claim[:120])
 
     for drug in _KNOWN_DRUGS:
         if drug in text:

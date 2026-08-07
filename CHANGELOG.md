@@ -1,5 +1,13 @@
 # CHANGELOG — 患者照护助手
 
+## 2026-08-07 — V2 阶段 1：证据双轨（LLM 证据法官 + 确定性兜底）
+
+- 新增 `app/services/evidence_judge.py`：LLM 证据法官对「证据是否充分支撑回答」「未被规则捕获的语义冲突」「关键论断是否有证据支持」输出结构化 verdict（supported / unsupported / conflict / insufficient）与 claim → evidence_id 绑定。
+- 契约扩展（`app/schemas/retrieval.py`）：新增 `EvidenceJudgeVerdict` / `ClaimBinding` / `EvidenceJudgeResult`；`EvidenceCheck` 增加 `judge` 与 `verdict_source` 字段（向后兼容）。
+- 双轨合并：`pipeline.py` 证据检查节点在确定性判定后调用法官，LLM 可用时以智能判定为主（conflict→澄清、insufficient→澄清、unsupported 且禁止动作→拒答），LLM 失败/超时/空返回静默降级确定性；缺失重试路径不调用法官。
+- 引用校验增强：`citation_validator.py`（含包装包）支持 claim_bindings 显式校验，绑定证据 ID 不存在或 verdict=unsupported 直接标记。
+- 新开关：`EVIDENCE_JUDGE_ENABLED`（默认 true，测试环境关闭）、`EVIDENCE_JUDGE_TIMEOUT_SECONDS`；`judge_llm` 可注入。
+- 新增 `tests/test_evidence_judge.py`（解析/过滤/降级/合并）与 3 条 claim 绑定用例；全量 pytest 302 条通过。
 ## 2026-08-06 — 更新 GitHub 根 README
 
 - 补充独立测试集（29 条）实测结果表：27/29 通过（93.1%）、高风险召回 / 危险建议拦截 / 冲突发现率 100%、不必要拒答率 0%、P95 5.63s，口径链接 `docs/基线报告.md`。

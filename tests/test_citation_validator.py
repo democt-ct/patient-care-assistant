@@ -77,3 +77,46 @@ def test_medication_task_still_flags_unsupported_drug():
         task="medication_allergy_check",
     )
     assert report.valid is False
+
+# ── V2：显式 claim → evidence_id 绑定校验 ──
+
+def test_claim_binding_with_valid_ids_passes():
+    pack = _pack(_item("allergy_history", "青霉素过敏", source_id="profile-1", record_date=None))
+    report = validate_answer(
+        "你青霉素过敏。",
+        pack,
+        task="medication_allergy_check",
+        claim_bindings=[
+            {"claim": "青霉素过敏", "evidence_ids": ["ev-profile-1"], "verdict": "supported"},
+        ],
+    )
+    assert report.valid is True
+    assert "青霉素过敏" in report.supported_claims
+
+
+def test_claim_binding_with_missing_evidence_id_fails():
+    pack = _pack(_item("allergy_history", "青霉素过敏", source_id="profile-1", record_date=None))
+    report = validate_answer(
+        "你青霉素过敏。",
+        pack,
+        task="medication_allergy_check",
+        claim_bindings=[
+            {"claim": "青霉素过敏", "evidence_ids": ["ev-nonexistent"], "verdict": "supported"},
+        ],
+    )
+    assert report.valid is False
+    assert any("绑定证据缺失" in claim for claim in report.unsupported_claims)
+
+
+def test_claim_binding_unsupported_fails():
+    pack = _pack(_item("allergy_history", "青霉素过敏", source_id="profile-1", record_date=None))
+    report = validate_answer(
+        "建议加用阿司匹林。",
+        pack,
+        task="medication_allergy_check",
+        claim_bindings=[
+            {"claim": "加用阿司匹林", "evidence_ids": [], "verdict": "unsupported"},
+        ],
+    )
+    assert report.valid is False
+    assert "加用阿司匹林" in report.unsupported_claims

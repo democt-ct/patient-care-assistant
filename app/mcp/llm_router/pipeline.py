@@ -4,9 +4,20 @@ from typing import Any, Optional
 
 from app.agent.graph import AgentGraph, AgentGraphState, AgentNode
 from app.mcp.llm_router.output_contract import assemble_output_contract
-from app.schemas.retrieval import EvidenceDecision, EvidencePack, TaskType
+from app.schemas.retrieval import (
+    EvidenceCheck,
+    EvidenceConflict,
+    EvidenceDecision,
+    EvidenceJudgeResult,
+    EvidenceJudgeVerdict,
+    EvidencePack,
+    EvidenceStatus,
+    RetrievalRoute,
+    TaskType,
+)
 from app.services.agentic_retrieval import build_evidence_pack_from_structured_result
 from app.services.citation_validator import validate_answer
+from app.services.evidence_judge import judge_evidence
 from app.services.evidence_policy import evaluate_evidence
 from app.services.retrieval_router import route_question
 
@@ -22,6 +33,43 @@ _FACT_LABELS: dict[str, str] = {
     "timeline_records": "时间线记录",
     "report_facts": "报告指标",
 }
+
+
+def _merge_judge_verdict(
+    check: EvidenceCheck,
+    judge_result: Optional[EvidenceJudgeResult],
+    route: Optional[RetrievalRoute],
+) -> EvidenceCheck:
+    """V2 双轨合并：LLM 证据法官可用时以智能判定为主，确定性为兜底。
+
+    只允许智能层升级风险（conflict / insufficient / unsupported→拒答），
+    不允许把确定性的高危/冲突结论降级为放行。
+    """
+    if judge_result is None:
+        return check
+    check.judge = judge_result
+    check.verdict_source = "llm"
+    verdict = judge_result.verdict
+    if verdict is EvidenceJudgeVerdict.CONFLICT:
+        check.status = EvidenceStatus.CONFLICT
+        check.decision = EvidenceDecision.CLARIFY
+        if not check.conflicts:
+            check.conflicts = [
+                EvidenceConflict(
+                    field="llm_judge",
+                    values=[],
+                    note=judge_result.reason or "LLM 证据法官检测到未被规则捕获的语义冲突",
+                )
+            ]
+    elif verdict is EvidenceJudgeVerdict.INSUFFICIENT:
+        if check.status not in (EvidenceStatus.HIGH_RISK, EvidenceStatus.CONFLICT):
+            check.status = EvidenceStatus.MISSING
+            check.decision = EvidenceDecision.CLARIFY
+    elif verdict is EvidenceJudgeVerdict.UNSUPPORTED:
+        if route is not None and route.forbidden_actions:
+            check.status = EvidenceStatus.HIGH_RISK
+            check.decision = EvidenceDecision.REFUSE
+    return check
 
 
 def install_graph_pipeline(namespace: dict[str, Any]) -> None:
@@ -114,6 +162,25 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
             state.note(f"missing_retry:{attempt}")
             return "retrieval"
 
+        # ── V2 双轨：LLM 证据法官为主、确定性兜底（缺失重试路径不调用）──
+        candidate = state.context.get("candidate_result") or {}
+        try:
+            judge_result = judge_evidence(
+                state.context.get("question", ""),
+                candidate.get("answer", ""),
+                pack,
+                route,
+                llm=state.context.get("judge_llm"),
+            )
+        except Exception:
+            judge_result = None
+        check = _merge_judge_verdict(check, judge_result, route)
+        state.context["evidence_check"] = check.model_dump(mode="json")
+        if check.judge is not None:
+            candidate["claim_bindings"] = [
+                binding.model_dump(mode="json") for binding in check.judge.claim_bindings
+            ]
+
         result = state.context["candidate_result"]
         if check.decision is EvidenceDecision.REFUSE:
             result["answer"] = (
@@ -134,7 +201,12 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
         route = state.context.get("route")
         pack = state.context.get("evidence_pack") or EvidencePack()
         result = state.context["candidate_result"]
-        report = validate_answer(result.get("answer", ""), pack, task=route.task.value if route else None)
+        report = validate_answer(
+            result.get("answer", ""),
+            pack,
+            task=route.task.value if route else None,
+            claim_bindings=result.get("claim_bindings"),
+        )
         state.context["citation_report"] = {
             "checked": report.checked,
             "valid": report.valid,
@@ -161,6 +233,7 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
             "supported_count": 0,
             "unsupported_count": 0,
         }
+        result.setdefault("claim_bindings", [])
         result.setdefault("planning", {})
         result["planning"].setdefault("graph", graph.describe())
         route = state.context.get("route")
@@ -210,6 +283,7 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
             "allergy_drugs": kwargs.get("allergy_drugs"),
             "allergy_history_unknown": kwargs.get("allergy_history_unknown", False),
             "risk_signals": kwargs.get("risk_signals"),
+            "judge_llm": kwargs.get("judge_llm"),
         }
 
     def run_graph(question: str, *, on_phase=None, **kwargs: Any) -> dict[str, Any]:
