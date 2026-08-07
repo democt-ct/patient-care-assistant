@@ -38,6 +38,10 @@ from app.mcp.schemas import (
 from app.services.memory_extraction_service import (
     create_conversation_message,
 )
+from app.services.memory_preference_service import (
+    get_memory_preference_optional,
+    preference_payload,
+)
 
 router = APIRouter(prefix="/api/v1/mcp/agent", tags=["智能问答与工具（mcp-server）"])
 
@@ -84,6 +88,9 @@ async def _agent_stream_generator(
         )
         if resolved_pid:
             patient_id, hospital_id = resolved_pid, resolved_hid
+        personalization = (
+            preference_payload(get_memory_preference_optional(db, patient_id)) if patient_id else None
+        )
     except Exception:
         yield _sse_event("error", {"detail": "身份验证失败"})
         return
@@ -107,6 +114,22 @@ async def _agent_stream_generator(
             pass
 
     risk_signals = MCPRiskSignals()
+
+    personalization: dict = {}
+    if patient_id:
+        try:
+            from app.services.memory_preference_service import get_memory_preference_optional
+
+            preference = get_memory_preference_optional(db, patient_id)
+            if preference is not None:
+                personalization = {
+                    "answer_length": preference.answer_length,
+                    "medical_term_level": preference.medical_term_level,
+                    "risk_alert_level": preference.risk_alert_level,
+                    "tone_style": preference.tone_style,
+                }
+        except Exception:
+            pass
 
     # ── Phase 3: Run agent (streaming) ──
     yield _sse_event("status", {"phase": "agent", "message": "正在分析问题..."})
@@ -136,6 +159,7 @@ async def _agent_stream_generator(
                 session_id=session_id,
                 conversation_context=conversation_context,
                 risk_signals=risk_signals,
+                personalization=personalization,
             ),
             timeout=STREAM_AGENT_TIMEOUT_SECONDS,
         )

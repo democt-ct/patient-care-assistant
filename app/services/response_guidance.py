@@ -35,6 +35,8 @@ def personalize_response(
     """按患者偏好调整回答；返回 (answer, applied_flags)。"""
     prefs = preferences or {}
     applied: dict[str, Any] = {"personalized": False}
+    if not prefs:
+        return answer or "", applied
     text = answer or ""
 
     risk_alert_level = str(prefs.get("risk_alert_level") or "medium").lower()

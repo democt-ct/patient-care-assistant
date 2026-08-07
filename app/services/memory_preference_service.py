@@ -1,4 +1,4 @@
-﻿from typing import Optional
+﻿from typing import Any, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -19,6 +19,22 @@ def get_memory_preference(db: Session, patient_id: str) -> MemoryPreference:
 
 def get_memory_preference_optional(db: Session, patient_id: str) -> Optional[MemoryPreference]:
     return db.query(MemoryPreference).filter(MemoryPreference.patient_id == patient_id).first()
+
+
+def preference_payload(pref: Optional[MemoryPreference]) -> Optional[dict[str, Any]]:
+    """把偏好模型转成可注入提示词的字典（字段级，不含隐私备注）。"""
+    if pref is None:
+        return None
+    return {
+        "answer_style": pref.answer_style,
+        "answer_length": pref.answer_length,
+        "tone_style": pref.tone_style,
+        "medical_term_level": pref.medical_term_level,
+        "risk_alert_level": pref.risk_alert_level,
+        "preferred_language": pref.preferred_language,
+        "prefer_summary_first": bool(pref.prefer_summary_first),
+        "prefer_step_by_step": bool(pref.prefer_step_by_step),
+    }
 
 
 def upsert_memory_preference(

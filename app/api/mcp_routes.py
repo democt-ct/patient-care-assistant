@@ -1467,6 +1467,7 @@ def mcp_agent_query(payload: MCPAgentQueryRequest, db: Session = Depends(get_db)
     auth_token = normalize_optional_auth_token(payload.auth_token)
     session_id = _resolve_session_id(payload.session_id)
     chat_mode = _normalize_chat_mode(payload.chat_mode)
+    personalization: dict = {}
     
     # Try to load short-term memory from Redis cache first
     cached_memory = get_short_term_memory(session_id)
@@ -1512,6 +1513,20 @@ def mcp_agent_query(payload: MCPAgentQueryRequest, db: Session = Depends(get_db)
                 allergy_drugs = _parse_allergy_drugs(allergy_history)
             else:
                 allergy_history_unknown = True
+            personalization = {}
+            try:
+                from app.services.memory_preference_service import get_memory_preference_optional
+
+                preference = get_memory_preference_optional(db, resolved_patient_id)
+                if preference is not None:
+                    personalization = {
+                        "answer_length": preference.answer_length,
+                        "medical_term_level": preference.medical_term_level,
+                        "risk_alert_level": preference.risk_alert_level,
+                        "tone_style": preference.tone_style,
+                    }
+            except Exception:
+                personalization = {}
         rendered_memory_context = _render_short_term_memory_context(input_short_term_memory)
         long_term_memory_context = _build_long_term_memory_context(db, resolved_patient_id, payload.question)
         client_context = (payload.conversation_context or "").strip() or None
@@ -1588,6 +1603,7 @@ def mcp_agent_query(payload: MCPAgentQueryRequest, db: Session = Depends(get_db)
                 allergy_drugs=allergy_drugs,
                 allergy_history_unknown=allergy_history_unknown,
                 risk_signals=current_risk_signals,
+                personalization=personalization,
             )
     except Exception as exc:
         error_type = type(exc).__name__[:80]
@@ -1707,6 +1723,7 @@ async def mcp_agent_query_with_image(
     if resolved_chat_mode == "general":
         resolved_patient_id = None
         resolved_hospital_id = None
+        personalization: dict = {}
         allergy_drugs: list[str] = []
         allergy_history_unknown: bool = False
     else:
@@ -1725,6 +1742,20 @@ async def mcp_agent_query_with_image(
                 allergy_drugs = _parse_allergy_drugs(allergy_history)
             else:
                 allergy_history_unknown = True
+            personalization = {}
+            try:
+                from app.services.memory_preference_service import get_memory_preference_optional
+
+                preference = get_memory_preference_optional(db, resolved_patient_id)
+                if preference is not None:
+                    personalization = {
+                        "answer_length": preference.answer_length,
+                        "medical_term_level": preference.medical_term_level,
+                        "risk_alert_level": preference.risk_alert_level,
+                        "tone_style": preference.tone_style,
+                    }
+            except Exception:
+                personalization = {}
     input_short_term_memory = parsed_short_term_memory or _default_short_term_memory()
     session_state = input_short_term_memory.session_state
 
@@ -1770,6 +1801,7 @@ async def mcp_agent_query_with_image(
         allergy_drugs=allergy_drugs,
         allergy_history_unknown=allergy_history_unknown,
         risk_signals=current_risk_signals,
+        personalization=personalization,
     )
     updated_short_term_memory = _roll_short_term_memory(
         input_short_term_memory,

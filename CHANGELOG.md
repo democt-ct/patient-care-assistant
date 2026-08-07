@@ -1,5 +1,12 @@
 # CHANGELOG — 患者照护助手
 
+## 2026-08-07 — V2 阶段 6：记忆个性化（回答长度/术语/风险提醒强度）
+
+- 新增 `app/services/response_guidance.py::personalize_response`：按 `memory_preferences` 调整风险提醒强度（high → 追加强提醒）、术语表达（plain → 通俗语言注记）、回答长度（brief 仅标记精简模式，出于安全不截断医疗内容）。
+- `pipeline.py` 输出装配节点在五段契约装配后应用个性化；无偏好时保持原样（noop）。
+- `memory_preference_service.py` 新增 `preference_payload`（字段级偏好字典，不含隐私备注）；`mcp_routes.py` 与 `stream_routes.py` 在身份解析后加载患者偏好并传入 Agent Graph（`personalization` kwarg）。
+- 新增 `tests/test_response_guidance.py` 个性化用例（强提醒/通俗语言/noop/管线级）；全量 pytest 326 条通过。
+
 ## 2026-08-07 — V2 阶段 4+5：安全红线收敛 + 引用安全网增强
 
 - 安全红线收敛：确定性短路保留强信号（自伤/自杀危机、明确高危组合）；普通风险症状（疼痛/发麻/麻木/不适等）不再硬拦截，新增 `app/services/response_guidance.py` 的 `embed_escalation_guidance`，在正常回答末尾自然内嵌「如果症状剧烈、伴大汗、呼吸困难或意识异常，请立即拨打 120 或前往急诊」并把 risk_level 标为 urgent。
