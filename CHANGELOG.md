@@ -1,5 +1,12 @@
 # CHANGELOG — 患者照护助手
 
+## 2026-08-07 — V2 阶段 3：规则手册知识化 + LLM 分类器路由兜底
+
+- 新增 `app/config/rulebook_knowledge.py`：把 7 类任务的「处理规范/话术/升级指引」整理为已审核知识块（review_status=approved，source 走 `hospital_approved_content` 注册源），`rulebook_context_for(route)` 按路由任务确定性检索并注入系统提示词（「以下是从规则手册检索到的处理规范，请严格遵守」「以下是从患者档案检索到的患者事实，仅用于核验，不得编造」）。
+- 新增 `scripts/import_rulebook_knowledge.py`：治理准入校验（allow_publish）并导出 `data/rulebook_knowledge.json` 可审计清单。
+- 路由兜底：`retrieval_router.py` 新增 LLM 分类器（`LLM_CLASSIFIER_ENABLED` 默认关闭），规则未命中时可选由 LLM 从 7 个 TaskType 中分类；失败/关闭时静默回退非个体化教育兜底；包装包 `retrieval_router/__init__.py` 同步透传 `llm`。
+- `pipeline.py` 生成节点注入规则手册知识块（已审核处理规范优先，患者事实块随后）。
+- 新增 `tests/test_rulebook_knowledge.py`（治理准入、注入内容、分类器开启/失败/关闭路径）；全量 pytest 318 条通过。
 ## 2026-08-07 — V2 阶段 2：澄清闭环（模糊主诉追问问卷 + 会话状态机）
 
 - 新增 `app/services/clarification.py`：非强信号模糊主诉（胸闷/头晕/乏力/恶心等）进入结构化追问问卷（性质/部位/持续时间/伴随症状/危险因素），完成后追加「是否缓解」追问；未缓解或无法判断时保守升级为就医指引（risk_level=urgent）。

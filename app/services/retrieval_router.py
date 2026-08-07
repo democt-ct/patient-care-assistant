@@ -12,9 +12,11 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from dataclasses import dataclass
-from typing import Mapping, Optional
+from typing import Any, Mapping, Optional
 
 from app.schemas.retrieval import RetrievalRoute, RetrievalSource, TaskType
 
@@ -228,16 +230,78 @@ _FALLBACK_SPEC = _TaskSpec(
 )
 
 
-def route_question(question: str, *, context: Optional[Mapping[str, object]] = None) -> RetrievalRoute:
+LLM_CLASSIFIER_ENABLED = os.getenv("LLM_CLASSIFIER_ENABLED", "false").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
+_TASK_DESCRIPTIONS = {
+    TaskType.FACT_VERIFICATION: "查询患者病历/就诊记录中的明确事实（诊断、过敏、手术、接诊医生等）",
+    TaskType.MEDICATION_ALLERGY_CHECK: "用药/过敏核对、个体化用药决策（剂量、停药、换药）",
+    TaskType.REPORT_COMPREHENSION: "理解检查报告内容",
+    TaskType.LONGITUDINAL_COMPARISON: "比较不同日期记录的指标/病情变化",
+    TaskType.RISK_TRIAGE: "紧急症状或高风险分流",
+    TaskType.VISIT_PREPARATION: "整理就医准备问题清单",
+    TaskType.GENERAL_HEALTH_EDUCATION: "一般健康/药物知识科普（非个体化）",
+}
+
+
+def _classify_with_llm(llm: Any, question: str) -> Optional[TaskType]:
+    """LLM 分类器兜底：规则未命中时由 LLM 选择任务类型（默认关闭）。"""
+    lines = ["你是医疗问答路由分类器。请把用户问题归入以下任务之一："]
+    lines.extend(f"- {task.value}：{desc}" for task, desc in _TASK_DESCRIPTIONS.items())
+    lines.append('严格输出 JSON：{"task": "<任务>"}，不要输出其他文字。')
+    lines.append(f"用户问题：{question}")
+    prompt = "\n".join(lines)
+    try:
+        response = llm.invoke(prompt)
+        raw = getattr(response, "content", response)
+        if isinstance(raw, (list, tuple)):
+            raw = "".join(str(item) for item in raw)
+        text = str(raw or "").strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+        start, end = text.find("{"), text.rfind("}")
+        if start >= 0 and end > start:
+            payload = json.loads(text[start : end + 1])
+        else:
+            payload = json.loads(text)
+        task_value = str(payload.get("task") or "").strip().lower()
+        return next((task for task in TaskType if task.value == task_value), None)
+    except Exception:
+        return None
+
+
+def route_question(
+    question: str,
+    *,
+    context: Optional[Mapping[str, object]] = None,
+    llm: Any = None,
+) -> RetrievalRoute:
     """将用户问题归入任务类型并返回检索路由。
 
     参数 ``context`` 预留给会话上下文 / 历史任务（如图片上传、对话记忆），
-    第一版不参与判定，保持纯确定性。
+    第一版不参与判定，保持纯确定性；``llm`` 为规则未命中时的分类器兜底
+    （仅当 ``LLM_CLASSIFIER_ENABLED`` 开启时使用，默认关闭）。
     """
     text = (question or "").strip().lower()
     for spec in _SPECS:
         if any(re.search(pattern, text) for pattern in spec.patterns):
             return spec.to_route()
+    if LLM_CLASSIFIER_ENABLED:
+        if llm is None:
+            try:
+                from app.mcp.config import get_llm
+
+                llm = get_llm()
+            except Exception:
+                llm = None
+        if llm is not None:
+            task = _classify_with_llm(llm, question)
+            if task is not None:
+                return route_for_task(task)
     return _FALLBACK_SPEC.to_route()
 
 

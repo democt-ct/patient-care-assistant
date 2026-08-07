@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from app.agent.graph import AgentGraph, AgentGraphState, AgentNode
+from app.config.rulebook_knowledge import rulebook_context_for
 from app.mcp.llm_router.output_contract import assemble_output_contract
 from app.schemas.retrieval import (
     EvidenceCheck,
@@ -238,6 +239,15 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
         if context.get("candidate_result") is not None:
             state.note("skipped:direct_evidence")
             return "evidence_check"
+        # V2 规则手册知识注入：已审核处理规范优先，患者事实块随后
+        rulebook = rulebook_context_for(context.get("route"))
+        if rulebook:
+            patient_block = context.get("conversation_context")
+            merged = rulebook
+            if patient_block:
+                merged += "\n\n以下是从患者档案检索到的患者事实，仅用于核验，不得编造：\n" + patient_block
+            context["conversation_context"] = merged
+
         context["candidate_result"] = executor_run(
             context["question"],
             auth_token=context["auth_token"],

@@ -1,0 +1,86 @@
+[
+  {
+    "source_id": "hospital_approved_content",
+    "source_type": "hospital_protocol",
+    "source_url": "internal://rulebook/v2",
+    "title": "病历事实核验",
+    "content": "只陈述患者结构化记录中的事实（诊断、过敏、用药、就诊医生、手术、复诊等），返回事实、日期与来源；不推断、不补全、不把常识当患者事实。\n回答必须可追溯到证据包；来源冲突时列出双方日期与来源并转医生确认；证据缺失时澄清或拒答，不得编造。\n如患者询问紧急症状或危险用药，按安全门禁处理。",
+    "task": "fact_verification",
+    "review_status": "approved",
+    "source_ref": "internal-rulebook-v2",
+    "reviewed_by": "patient-care-assistant@internal",
+    "reviewed_at": "2026-08-07"
+  },
+  {
+    "source_id": "hospital_approved_content",
+    "source_type": "hospital_protocol",
+    "source_url": "internal://rulebook/v2",
+    "title": "用药与过敏核对",
+    "content": "核对过敏史与当前用药；禁止给出个体化剂量、停药、换药、药物相互作用结论。\n先说明记录的过敏/用药事实，再给出风险提示；过敏+慎用边界必须转医生/药师确认；不替患者下临床结论。\n如患者描述严重过敏反应（呼吸困难、喉头水肿、意识改变），提示立即拨打 120。",
+    "task": "medication_allergy_check",
+    "review_status": "approved",
+    "source_ref": "internal-rulebook-v2",
+    "reviewed_by": "patient-care-assistant@internal",
+    "reviewed_at": "2026-08-07"
+  },
+  {
+    "source_id": "hospital_approved_content",
+    "source_type": "hospital_protocol",
+    "source_url": "internal://rulebook/v2",
+    "title": "风险分流",
+    "content": "强信号（胸痛、呼吸困难、大出血、昏迷等）直接给急救/就医指引；自伤/自杀危机给 12356 心理援助热线与 120 指引。\n不诊断、不建议自行处理；明确下一步（拨打 120 / 急诊 / 热线）。\n本任务本身即升级路径，不进入自由生成。",
+    "task": "risk_triage",
+    "review_status": "approved",
+    "source_ref": "internal-rulebook-v2",
+    "reviewed_by": "patient-care-assistant@internal",
+    "reviewed_at": "2026-08-07"
+  },
+  {
+    "source_id": "hospital_approved_content",
+    "source_type": "hospital_protocol",
+    "source_url": "internal://rulebook/v2",
+    "title": "就医准备",
+    "content": "基于病历/时间线整理就诊摘要与问题清单；不新增未记录的信息。\n区分记录事实与一般建议；清单仅供参考，以医生意见为准。\n如主诉含强风险信号，按安全门禁处理。",
+    "task": "visit_preparation",
+    "review_status": "approved",
+    "source_ref": "internal-rulebook-v2",
+    "reviewed_by": "patient-care-assistant@internal",
+    "reviewed_at": "2026-08-07"
+  },
+  {
+    "source_id": "hospital_approved_content",
+    "source_type": "hospital_protocol",
+    "source_url": "internal://rulebook/v2",
+    "title": "一般健康教育",
+    "content": "使用审核临床知识回答非个体化问题（药物用途/副作用、生活方式等）；禁止给出针对个人的剂量或治疗方案。\n明确这是通用知识而非个人诊疗建议；涉及用药时提醒遵医嘱。\n如症状描述演变为强信号，提示尽快就医。",
+    "task": "general_health_education",
+    "review_status": "approved",
+    "source_ref": "internal-rulebook-v2",
+    "reviewed_by": "patient-care-assistant@internal",
+    "reviewed_at": "2026-08-07"
+  },
+  {
+    "source_id": "hospital_approved_content",
+    "source_type": "hospital_protocol",
+    "source_url": "internal://rulebook/v2",
+    "title": "报告理解",
+    "content": "区分报告事实与一般解释；异常指标提示由医生判读。\n引用报告字段与日期；不下诊断结论。\n危急值或强风险提示按安全门禁处理。",
+    "task": "report_comprehension",
+    "review_status": "approved",
+    "source_ref": "internal-rulebook-v2",
+    "reviewed_by": "patient-care-assistant@internal",
+    "reviewed_at": "2026-08-07"
+  },
+  {
+    "source_id": "hospital_approved_content",
+    "source_type": "hospital_protocol",
+    "source_url": "internal://rulebook/v2",
+    "title": "历史纵向比较",
+    "content": "比较不同日期记录的变化，描述趋势，不下诊断。\n给出各日期数值与变化方向；不推断病因。\n如变化显著且伴强风险信号，提示就医。",
+    "task": "longitudinal_comparison",
+    "review_status": "approved",
+    "source_ref": "internal-rulebook-v2",
+    "reviewed_by": "patient-care-assistant@internal",
+    "reviewed_at": "2026-08-07"
+  }
+]

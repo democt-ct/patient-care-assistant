@@ -19,7 +19,7 @@ _DRUG_CONTEXT = re.compile(
 _SAFETY_CONTEXT = re.compile(r"禁忌|注意事项|能不能|可以吃|可以用|慎用|副作用|不良反应")
 
 
-def route_question(question: str, *, context=None) -> RetrievalRoute:
+def route_question(question: str, *, context=None, llm=None) -> RetrievalRoute:
     text = (question or "").strip().lower()
     if (
         _PATIENT_CONTEXT.search(text)
@@ -34,4 +34,4 @@ def route_question(question: str, *, context=None) -> RetrievalRoute:
             max_retrieval_rounds=1,
             route_reason="patient_specific_medication_context",
         )
-    return _legacy_route_question(question, context=context)
+    return _legacy_route_question(question, context=context, llm=llm)
