@@ -28,7 +28,7 @@
 | `data/chroma_knowledge/` | ChromaDB 向量库 |
 | `docs/` | 项目文档 |
 | `scripts/` | 工具脚本（批量导入、质量评估、种子数据） |
-| `tests/` | pytest 测试（290 个） |
+| `tests/` | pytest 测试（332 个） |
 | `docker-compose.yml` | PostgreSQL 15 (:5433) + Redis 7 (:6380) |
 | `start_dev.bat` | 本地一键启动 |
 
@@ -44,7 +44,7 @@
 | **Docker 服务** | `docker compose up -d` | 启动 PostgreSQL(:5433) 与 Redis(:6380) |
 | **前端开发** | `cd frontend && npm run dev` | :3000 代理到 :8001 |
 | **内网穿透** | 双击 `start_tunnel.bat` | 一键后端 + Cloudflare 隧道 |
-| **质量评估** | `python scripts/run_evaluation.py --split test --verbose` | 运行 47 条分层评估用例（18 开发 / 29 独立测试；用例数据源在 `app/config/evaluation_cases.py`） |
+| **质量评估** | `python scripts/run_evaluation.py --split test --verbose` | 运行 51 条分层评估用例（21 开发 / 30 独立测试；用例数据源在 `app/config/evaluation_cases.py`） |
 
 访问：
 - `http://localhost:3000` — React 前端（聊天 + 记忆 + Debug）
@@ -72,6 +72,10 @@
 | `RERANKER_MODEL` | BAAI/bge-reranker-v2-m3 | 重排序模型 |
 | `RETRIEVER_WARMUP_ENABLED` | false | 是否在启动时后台预热向量检索模型；离线或网络受限环境保持关闭 |
 | `PATIENT_FACT_EMBEDDING_ENABLED` | false | 患者结构化事实的向量排序开关；默认使用关键词排序，避免首问加载模型 |
+| `EVIDENCE_JUDGE_ENABLED` | true | V2 LLM 证据法官开关；LLM 不可用时静默降级确定性判定 |
+| `EVIDENCE_JUDGE_TIMEOUT_SECONDS` | 8 | 证据法官调用超时（秒） |
+| `LLM_CLASSIFIER_ENABLED` | false | 规则未命中时用 LLM 分类器兜底路由（灰度开关） |
+| `CLARIFICATION_TTL_SECONDS` | 3600 | 澄清追问会话状态有效期（秒） |
 | `SCHEDULER_ENABLED` | false | 后台定时任务 |
 | `TTS_PROVIDER` | kokoro | TTS 引擎 |
 | `STREAM_AGENT_TIMEOUT_SECONDS` | 20 | SSE Agent 后端调用超时秒数；超时后返回安全降级回答 |
@@ -86,6 +90,7 @@
 - **前端**: React 新版在 `frontend/`（`localhost:3000`），旧版在 `app/static/`（保留兼容）。质量评估控制台在 `/evaluate` 路由，已拆分为 `evaluate.html` + `css/evaluate.css` + `js/evaluate.js`
 - **评估用例数据源**: 用例统一定义在 `app/config/evaluation_cases.py`（单一数据源），HTTP 接口 `GET /api/v1/evaluation/cases`、命令行运行器、前端控制台均从此处取数，禁止硬编码副本。高风险用例使用 `safety_policy` 声明必须出现的安全提示与危险建议模式，不能以单个词的出现与否判定违规。
 - **评估运行记录**: 服务端评分接口为 `POST /api/v1/evaluation/score`；`POST /api/v1/evaluation/runs` 会保存带用例/评分/模型/提示词/知识库版本与 `trace_id` 的结果，`GET /api/v1/evaluation/runs/summary` 返回聚合趋势。持久化记录仅保留回答指纹与评分，不保存原始回答；生产库执行 `migration/20260727_evaluation_runs.sql`
+- **V2 对话型升级**: 证据双轨（LLM 证据法官为主、确定性兜底，`EVIDENCE_JUDGE_ENABLED` 开关）、模糊主诉澄清闭环（会话状态机 + Redis/内存存储）、规则手册知识块注入（`rulebook_knowledge.py`）、患者偏好个性化；确定性安全红线（危机/高危）始终短路，LLM 不可用时静默降级。
 - **事实查询直答**: 对诊断、既往用药、手术、接诊医生、复诊安排、过敏史和紧急联系人等明确记录查询，优先直接依据结构化病历/就诊/主档返回，不调用 LLM 改写；需要综合分析或临床判断时才进入 Agent 生成链路。
 - **种子数据同步**: `scripts/seed_patients.py` 可重复执行，按患者编码与记录标识补齐缺失的演示病历/就诊数据，不覆盖已存在记录。
 - **可观测性与隐私**: `/metrics` 的 HTTP 标签使用路由模板，禁止添加患者 ID、会话 ID、问题全文等高基数或敏感标签。结构化日志与 OTel span 使用同一 `trace_id`；患者/会话 ID 仅以哈希属性写入 span

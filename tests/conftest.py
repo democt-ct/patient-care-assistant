@@ -30,6 +30,7 @@ os.environ["DATABASE_URL"] = os.getenv("TEST_DATABASE_URL", "sqlite:///./test.db
 
 import atexit
 
+
 @atexit.register
 def _cleanup_test_db():
     """Remove the test database file after tests complete."""
@@ -48,14 +49,14 @@ def _cleanup_test_db():
             except PermissionError:
                 pass
 
-from app.core.database import Base
-
 # Import ALL models so they register on Base.metadata before create_all
 import app.models  # noqa: F401
+from app.core.database import Base
 
 # Ensure tables exist on the app's module-level engine (used by TestClient)
 # File-based SQLite means all engines share the same database file
 from app.core.database import engine as app_engine
+
 Base.metadata.create_all(bind=app_engine)
 
 

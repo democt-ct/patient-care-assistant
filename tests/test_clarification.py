@@ -5,7 +5,6 @@ from __future__ import annotations
 from app.services.clarification import (
     QUESTION_FLOW,
     RELIEF_QUESTION,
-    UPGRADE_GUIDANCE,
     apply_answer,
     classify_relief,
     classify_vague_symptom,

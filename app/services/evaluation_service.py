@@ -187,6 +187,32 @@ def evaluate_unnecessary_refusal(case: Mapping[str, Any], result: Optional[Mappi
     return True
 
 
+def evaluate_judge_accuracy(case, result):
+    """LLM 判定准确性（抽样）：法官判定与用例声明一致（仅当判定存在时统计）。"""
+    expected = case.get("expected_judge")
+    if not expected or not result:
+        return None
+    judge = (result.get("evidence_check") or {}).get("judge") or {}
+    verdict = judge.get("verdict")
+    if not verdict:
+        return None
+    return verdict == expected
+
+
+def evaluate_clarification_completion(case, result):
+    """澄清完成率：期望澄清的样本正确进入追问（单轮口径：已发起追问）。"""
+    if not case.get("expected_clarification") or not result:
+        return None
+    return bool(result.get("clarification_required"))
+
+
+def evaluate_unnecessary_clarification(case, result):
+    """不必要追问率（越低越好）：非模糊主诉样本未被误判为需要澄清。"""
+    if case.get("expected_clarification") or not result:
+        return None
+    return not bool(result.get("clarification_required"))
+
+
 def _rate(values: list[Optional[bool]]) -> dict[str, Any]:
     applicable = [value for value in values if value is not None]
     if not applicable:
@@ -222,6 +248,13 @@ def compute_metrics(results: list[Mapping[str, Any]]) -> dict[str, Any]:
         ),
         "unnecessary_refusal_rate": _rate(
             [evaluate_unnecessary_refusal(r["case"], r.get("result")) for r in results]
+        ),
+        "judge_accuracy": _rate([evaluate_judge_accuracy(r["case"], r.get("result")) for r in results]),
+        "clarification_completion_rate": _rate(
+            [evaluate_clarification_completion(r["case"], r.get("result")) for r in results]
+        ),
+        "unnecessary_clarification_rate": _rate(
+            [evaluate_unnecessary_clarification(r["case"], r.get("result")) for r in results]
         ),
         "p95_latency_seconds": p95,
         "total_samples": len(results),

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Any, Optional
 
 _legacy_path = Path(__file__).resolve().parent.parent / "citation_validator.py"
 exec(compile(_legacy_path.read_bytes(), str(_legacy_path), "exec"), globals(), globals())
 
-_legacy_validate_answer = validate_answer
+_legacy_validate_answer = validate_answer  # noqa: F821
 _PERCENT_RE = re.compile(r"\d+(?:\.\d+)?\s*%")
 _MEDICAL_ENTITY_RE = re.compile(
     r"高血压|糖尿病|冠心病|心肌梗死|脑卒中|肺炎|哮喘|肾功能不全|肝功能异常|"
@@ -19,15 +19,15 @@ _MEDICAL_ENTITY_RE = re.compile(
 
 def validate_answer(
     answer: str,
-    pack: EvidencePack,
+    pack: EvidencePack,  # noqa: F821
     *,
     task: Optional[str] = None,
     claim_bindings: Optional[list[dict[str, Any]]] = None,
-) -> CitationReport:
+) -> CitationReport:  # noqa: F821
     report = _legacy_validate_answer(answer, pack, task=task, claim_bindings=claim_bindings)
     if not answer or task == "general_health_education":
         return report
-    pack_text = _pack_text(pack)
+    pack_text = _pack_text(pack)  # noqa: F821
 
     for claim in _PERCENT_RE.findall(answer):
         if claim.lower() in pack_text:

@@ -20,7 +20,6 @@ from app.schemas.retrieval import (
 )
 from app.services.agentic_retrieval import build_evidence_pack_from_structured_result
 from app.services.citation_validator import validate_answer
-from app.services.evidence_judge import judge_evidence
 from app.services.clarification import (
     QUESTION_FLOW,
     RELIEF_QUESTION,
@@ -32,11 +31,10 @@ from app.services.clarification import (
     new_state,
     next_prompt,
 )
-
+from app.services.evidence_judge import judge_evidence
 from app.services.evidence_policy import evaluate_evidence
 from app.services.response_guidance import embed_escalation_guidance, personalize_response
 from app.services.retrieval_router import route_question
-
 
 _FACT_LABELS: dict[str, str] = {
     "allergy_history": "过敏史",
@@ -155,8 +153,10 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
         if record is None:
             if not classify_vague_symptom(question):
                 return "retrieval"
-            record = new_state(session_id, question)
-            store.set(record)
+            # 匿名会话（无 session_id）只询问第一问，不持久化状态，避免跨调用污染
+            record = new_state(session_id or "__anon__", question)
+            if session_id:
+                store.set(record)
             _set_clarify_result(
                 state,
                 next_prompt(record) or RELIEF_QUESTION,

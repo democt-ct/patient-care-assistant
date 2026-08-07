@@ -71,6 +71,7 @@ def evaluate_case(case: dict, verbose: bool = False) -> dict:
             "task_route": result.get("task_route"),
             "evidence_check": result.get("evidence_check"),
             "citation_report": result.get("citation_report"),
+            "clarification_required": result.get("clarification_required"),
             "answer": answer,
         }
     except Exception as exc:

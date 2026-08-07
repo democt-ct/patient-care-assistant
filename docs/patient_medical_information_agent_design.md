@@ -1,7 +1,7 @@
 # 患者医疗信息核验与就医导航 Agent 设计
 
 > 状态：秋招 MVP 设计基线（已结合当前实现更新）
-> 更新日期：2026-08-04
+> 更新日期：2026-08-07（含 V2 对话型 Agent 升级章节）
 > 面向读者：面试官、项目协作者、后续维护者，以及需要系统复习项目的本人
 
 ---
@@ -605,3 +605,73 @@ emergency → high_risk → conflict → missing → sufficient
 - 不把照护任务状态交给模型自由修改。
 - 不在 MVP 阶段建设通用临床关系图谱或完整指标平台。
 - 不以模型思维链作为产品可解释性输出。
+
+---
+
+## 20. V2 对话型 Agent 升级（2026-08-07）
+### 20.1 升级目标
+
+从「V1 安全底座」升级为「V2 对话型 Agent」：证据核查双轨化（LLM 证据法官 + 确定性兜底）、
+澄清闭环、规则手册知识化、安全红线收敛、引用安全网增强、记忆个性化、评估体系扩展。
+
+### 20.2 证据双轨（Evidence Judge）
+
+- 确定性层（`evidence_policy.py`）保留为兜底基线：覆盖率 / 缺失 / 同字段同日期冲突硬判定。
+- 智能层（`evidence_judge.py`）：LLM 证据法官对「证据是否充分支撑回答」「未被规则捕获的语义冲突」
+  「回答中的每个关键论断是否有证据支持」做判定，输出结构化 verdict
+  （supported / unsupported / conflict / insufficient）与 claim → evidence_id 绑定。
+- 双轨规则：LLM 判定可用时以智能判定为主（conflict→澄清、insufficient→澄清、
+  unsupported 且禁止动作→拒答），确定性为兜底；LLM 不可用 / 超时 / 空返回静默降级，
+  不允许因 LLM 失败导致链路崩溃。缺失重试路径不调用法官。
+- 输出：`evidence_check.judge` + 可选 `claim_bindings` 字段；引用校验按绑定校验，
+  绑定证据缺失或 verdict=unsupported 直接标记，高危任务覆盖为安全拒答。
+- 开关：`EVIDENCE_JUDGE_ENABLED`（默认 true，测试环境关闭）、`EVIDENCE_JUDGE_TIMEOUT_SECONDS`。
+
+### 20.3 澄清闭环
+
+- 模糊主诉（胸闷 / 头晕 / 乏力 / 恶心等非强信号）进入追问问卷：
+  性质 → 部位 → 持续时间 → 伴随症状 → 危险因素；问卷完成后追加「是否缓解」追问；
+  未缓解或无法判断时保守升级为就医指引（risk_level=urgent，next_action=contact_doctor）。
+- 状态机 `ClarificationState` + `ClarificationStore`（Redis 优先、内存兜底，TTL 1 小时）；
+  匿名会话（无 session_id）只询问第一问，不持久化状态。
+- 安全红线不变：强信号仍由安全门禁在澄清之前短路，澄清不改变门禁判定。
+
+### 20.4 规则手册知识化
+
+- 7 类任务的「处理规范 / 话术 / 升级指引」整理为已审核知识块
+  （review_status=approved，source 走 `hospital_approved_content` 注册源）；
+  `scripts/import_rulebook_knowledge.py` 做治理准入校验并导出
+  `data/rulebook_knowledge.json` 可审计清单。
+- 运行时按路由任务确定性检索注入提示词（「以下是从规则手册检索到的处理规范，请严格遵守」+
+  「以下是从患者档案检索到的患者事实，仅用于核验，不得编造」）。
+- LLM 分类器（`LLM_CLASSIFIER_ENABLED`，默认关闭）作为规则未命中时的路由兜底，
+  从 7 个 TaskType 中选择任务，失败/关闭时静默回退非个体化教育兜底。
+
+### 20.5 安全红线收敛
+
+- 确定性短路收敛为强信号（自伤/自杀危机、明确高危组合词）；
+- 普通风险症状（疼痛 / 发麻 / 麻木 / 不适）不再硬拦截，在正常回答末尾自然内嵌升级指引
+  （「如果症状剧烈、伴大汗、呼吸困难或意识异常，请立即拨打 120 或前往急诊」），
+  并把 risk_level 标为 urgent。
+
+### 20.6 引用安全网
+
+- 药物 / 日期 / 剂量必须在证据包中有依据，否则高危任务回答被覆盖为
+  「当前记录无法支持该结论，请以医生/药师为准」；
+- claim → evidence_id 显式绑定进入输出，供前端与审计使用。
+
+### 20.7 记忆个性化
+
+- 读取 `memory_preferences`：`risk_alert_level` 高 → 强化风险提醒；
+  `medical_term_level=plain` → 追加通俗语言说明；`answer_length=brief` → 精简模式标记
+  （出于安全不截断医疗内容）。结果附带 `personalization_applied` 标记。
+
+### 20.8 评估体系扩展
+
+- 新增指标（保持既有 8 项 MVP 指标口径兼容）：
+  - `judge_accuracy`：LLM 证据法官判定抽样准确性（仅判定存在时统计）；
+  - `clarification_completion_rate`：期望澄清的模糊主诉样本正确进入追问的比例；
+  - `unnecessary_clarification_rate`：非模糊主诉样本被误判为需要追问的比例（越低越好）。
+- 评估用例 47 → 51：clarify-001/002（dev）、judge-001（dev）、judge-002（test）。
+- 评估运行记录仍只存回答指纹与评分，不保存原始回答与 claim 原文。
+---

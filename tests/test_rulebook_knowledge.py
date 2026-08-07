@@ -5,7 +5,7 @@ from __future__ import annotations
 from app.config.rulebook_knowledge import RULEBOOK_ENTRIES, rulebook_context_for
 from app.schemas.retrieval import RetrievalRoute, RetrievalSource, TaskType
 from app.services.clinical_knowledge_governance import validate_clinical_knowledge_payload
-from app.services.retrieval_router import LLM_CLASSIFIER_ENABLED, route_for_task, route_question
+from app.services.retrieval_router import route_for_task, route_question
 
 
 class _FakeLLM:

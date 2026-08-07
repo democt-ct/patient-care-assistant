@@ -1,7 +1,6 @@
 import base64
-import os
-import json
 import math
+import os
 import re
 import time
 import uuid
@@ -11,14 +10,27 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from app.config.faq_knowledge import format_faq_context, search_faq
 from app.core.database import get_db
 from app.core.metrics import observe_agent_query
 from app.core.redis_client import (
     get_short_term_memory,
     set_short_term_memory,
-    delete_session_cache,
+)
+from app.core.tracing import (
+    record_agent_error,
+    trace_agent_phase,
+)
+from app.core.tracing import (
+    record_escalation as record_escalation_metric,
 )
 from app.mcp.auth import verify_auth_token
+from app.mcp.escalation import (
+    EscalationReason,
+    create_escalation,
+    determine_escalation_priority,
+    should_escalate_from_triage,
+)
 from app.mcp.llm_router import run_agent_tool_query
 from app.mcp.schemas import (
     MCPActiveEntities,
@@ -26,8 +38,8 @@ from app.mcp.schemas import (
     MCPAgentQueryResponse,
     MCPIssueTokenRequest,
     MCPRecentMessage,
-    MCPSessionState,
     MCPRiskSignals,
+    MCPSessionState,
     MCPShortTermMemory,
     MCPSpeechRequest,
     MCPSpeechResponse,
@@ -37,35 +49,21 @@ from app.mcp.schemas import (
 )
 from app.mcp.server import mcp_server, normalize_optional_auth_token
 from app.mcp.speech import SpeechSynthesisError, synthesize_speech_with_llm
-from app.mcp.state_machine import SessionState, SessionStateMachine
+from app.mcp.state_machine import SessionStateMachine
 from app.mcp.triage import triage as run_triage
-from app.mcp.escalation import (
-    EscalationReason,
-    create_escalation,
-    determine_escalation_priority,
-    should_escalate_from_triage,
-)
-from app.core.tracing import (
-    record_agent_error,
-    record_escalation as record_escalation_metric,
-    trace_agent_phase,
-)
-from app.models.memory_key_event import MemoryKeyEvent
 from app.models.memory_business_profile import MemoryBusinessProfile
 from app.models.memory_conversation_profile import MemoryConversationProfile
-from app.models.memory_user_profile import MemoryUserProfile
+from app.models.memory_key_event import MemoryKeyEvent
 from app.models.memory_preference import MemoryPreference
+from app.models.memory_user_profile import MemoryUserProfile
 from app.models.patient import Patient
-from app.services.patient_service import get_patient, list_medical_records, list_visit_records
 from app.services.memory_extraction_service import (
     build_knowledge_context,
     create_conversation_message,
     create_session_buffer_message,
-    list_conversation_messages,
     promote_session_buffer_to_patient,
 )
-from app.config.faq_knowledge import search_faq, format_faq_context
-
+from app.services.patient_service import get_patient, list_medical_records, list_visit_records
 
 router = APIRouter(prefix="/api/v1/mcp", tags=["智能问答与工具（mcp-server）"])
 
@@ -1897,6 +1895,7 @@ def mcp_agent_speech(payload: MCPSpeechRequest):
 
 from pydantic import BaseModel as _BaseModel
 
+
 class RAGASJudgeRequest(_BaseModel):
     question: str
     answer: str
@@ -1953,8 +1952,9 @@ def _build_ragas_judge_prompt(question: str, answer: str, context: str, referenc
     description="使用 LLM 对问答对进行忠实度、相关性、召回率、精确度评估。",
 )
 def ragas_judge(payload: RAGASJudgeRequest):
-    from app.mcp.config import get_llm
     import json as _json
+
+    from app.mcp.config import get_llm
 
     llm = get_llm()
     prompt = _build_ragas_judge_prompt(
@@ -2007,6 +2007,7 @@ def ragas_judge(payload: RAGASJudgeRequest):
 
 from pydantic import BaseModel as _EscBaseModel
 
+
 class EscalationAckRequest(_EscBaseModel):
     escalation_id: str
     notes: str = ""
@@ -2023,7 +2024,7 @@ class EscalationResolveRequest(_EscBaseModel):
     description="列出所有待处理的人工升级请求。",
 )
 def list_escalations():
-    from app.mcp.escalation import list_pending_escalations, get_escalation_stats
+    from app.mcp.escalation import get_escalation_stats, list_pending_escalations
     return {
         "pending": [r.to_dict() for r in list_pending_escalations()],
         "stats": get_escalation_stats(),

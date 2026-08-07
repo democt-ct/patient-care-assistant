@@ -1,11 +1,18 @@
 # CHANGELOG — 患者照护助手
 
-## 2026-08-07 — V2 阶段 6：记忆个性化（回答长度/术语/风险提醒强度）
+## 2026-08-07 — V2 阶段 7：评估体系升级（智能证据判定 / 澄清闭环指标）
 
-- 新增 `app/services/response_guidance.py::personalize_response`：按 `memory_preferences` 调整风险提醒强度（high → 追加强提醒）、术语表达（plain → 通俗语言注记）、回答长度（brief 仅标记精简模式，出于安全不截断医疗内容）。
-- `pipeline.py` 输出装配节点在五段契约装配后应用个性化；无偏好时保持原样（noop）。
-- `memory_preference_service.py` 新增 `preference_payload`（字段级偏好字典，不含隐私备注）；`mcp_routes.py` 与 `stream_routes.py` 在身份解析后加载患者偏好并传入 Agent Graph（`personalization` kwarg）。
-- 新增 `tests/test_response_guidance.py` 个性化用例（强提醒/通俗语言/noop/管线级）；全量 pytest 326 条通过。
+- 评估指标扩展（`evaluation_service.py`，保持 8 项 MVP 口径兼容）：`judge_accuracy`（LLM 判定抽样准确率）、`clarification_completion_rate`（澄清发起率）、`unnecessary_clarification_rate`（不必要追问率）。
+- 评估用例 47 → 51：clarify-001/002（模糊主诉进入追问，dev）、judge-001（法官 supported，dev）、judge-002（法官 supported，test）；`run_evaluation.py` 契约补充 `clarification_required`。
+- 澄清节点匿名会话守卫：无 session_id 只询问第一问、不持久化状态，评估运行器单轮可跑通澄清用例。
+- 新增 `tests/test_evaluation_v2_metrics.py`（6 条）；全量 pytest 332 条通过。
+
+## 2026-08-07 — V2 阶段 6：记忆个性化
+
+- 新增 `app/services/response_guidance.py` 的 `personalize_response`：按 `memory_preferences` 患者偏好调整回答——`risk_alert_level=high/strong` 且风险等级 urgent/emergency 时强化风险提醒；`medical_term_level=plain` 时追加通俗语言说明；`answer_length=brief` 标记精简模式（出于安全不截断医疗内容）。
+- API 接线：`mcp_routes.py`（两个 Agent 查询端点）与 `stream_routes.py` 从 `get_memory_preference_optional` 加载偏好并传入管线；`pipeline.py` 输出装配阶段应用个性化，结果附带 `personalization_applied` 标记。
+- 修复 `app/api/stream_routes.py` 历史遗留的 `\r\r\n` 双 CR 换行损坏。
+- 新增 4 条个性化测试（函数级 + 管线级，含与内嵌升级指引的组合）；全量 pytest 326 条通过。
 
 ## 2026-08-07 — V2 阶段 4+5：安全红线收敛 + 引用安全网增强
 
@@ -40,7 +47,6 @@
 - 新增危机干预（自伤/自杀 → 12356 心理援助热线 + 120）、药物教育路由说明，以及评估控制台 8 项 MVP 指标口径说明。
 - 测试数量同步为 290 条 pytest + 前端 Vitest 单测。
 
-
 ## 2026-08-04 — 评估控制台增加 MVP 指标与口径说明
 
 - 控制台新增「秋招 MVP 指标」区块：路由准确率、高风险召回率、危险建议拦截率、引用正确率、冲突发现率、证据不足正确拒答率、不必要拒答率、P95 延迟共 8 项，客户端按与 `evaluation_service.compute_metrics` 一致的口径实时计算。
@@ -48,13 +54,11 @@
 - `runCase` 结果对象补充 `task_route` / `risk_level` / `next_action` / `evidence_check` / `citation_report` 契约字段，供指标计算使用。
 - 指标计算逻辑经 Node 单测验证（高风险召回、路由、引用、冲突、拒答、不必要拒答、P95 全部符合预期）。
 
-
 ## 2026-08-04 — 评估控制台修复：全失败与意图未识别
 
 - 修复 `app/static/js/evaluate.js` 的 TDZ 引用错误：`runCase` 在构造 `result` 时引用了尚未初始化的 `score`，导致每条用例抛 `ReferenceError`、全部显示失败且意图为空；改为先构造结果再计算评分。
 - 本地评估限流从 60 提升到 600 次/分钟（`.env`），控制台批量运行不再被 429 拒绝。
 - 控制台新增「RAGAS 评判」开关（默认关闭），批量评估默认跳过额外 LLM 评判调用。
-
 
 ## 2026-08-04 — DeepSeek 密钥配置与完整独立测试集实测
 
@@ -63,7 +67,6 @@
 - 修正 `general-001` 评估断言为等价措辞（限盐/饮食/血压），general 前缀 4/4 通过。
 - 恢复被并发会话误清空的 `app/mcp/llm_router/pipeline.py`（完整图编排实现）；兼容并发会话新增的 services 包装包与 `agentic_sources.py`，并修正 supplement 测试断言为「仅已审核知识进入默认检索」。
 - 已知待办：`missing-001/003` 证据不足拒答措辞（`apply_hallucination_check` 在空 `tool_result` 下 TypeError 降级）。
-
 
 ## 2026-08-04 — Agent 设计与执行计划文档深化
 
@@ -82,7 +85,6 @@
 - 前端接入 Vitest：新增 `ChatPanel.test.tsx`（标签映射 + ContractCard 渲染），`npm test` 4 条通过。
 - 文档数字统一：ORM 表数 11→17、测试数 288、评估用例 45（18 dev / 27 test）。
 
-
 ## 2026-08-04 — 演示调优：确定性路径全绿 + 人工闭环验证
 
 - 事实核验按子类型拆分路由（紧急联系人 / 就诊医生 / 手术 / 诊断），required_facts 只取本类问题所需字段，消除"查一个医生还要有手术史"的不必要澄清。
@@ -94,13 +96,11 @@
 - 演示脚本与面试文档补充「人工闭环」话术；基线报告回填确定性子集实测数字（LLM 路径待密钥）。
 - 全量 pytest 288 条通过。
 
-
 ## 2026-08-04 — docs 目录整理（16 → 11 个文件）
 
 - 合并：`患者过敏安全机制设计.md` → `医疗安全与知识治理.md`（过敏五层防护）；`postgresql_redis_setup.md` → `docker_deployment.md`（PG/Redis 手动安装）；`面试技术文档.md` 精华 → `面试准备-项目知识点.md`（核心亮点 + 高频追问速答 + 深挖方向）。
 - 删除：`docs/README.md`（过时实现说明）、`agent_graph_and_agentic_rag.md`（已被主线设计文档取代）、以及上述三份已合并源文件。
 - 更新：根 README 面试文档链接、`docs/项目结构文档.md` 文档目录树与索引表；`照护计划MVP.md` 保留为扩展模块设计文档。
-
 
 ## 2026-08-04 — 修复药物教育的过度拒答
 
@@ -110,7 +110,6 @@
 - 分诊规则补充「晕倒」「昏迷」紧急信号；路由准确率对门禁先行停止的样本按不适用处理（不计入样本）。
 - 新增回归测试：药物教育问题必须回答、不得拒答；个体化剂量问题仍走用药核对与拦截。
 - 评估集新增 `general-003` / `general-004` 两条药物教育用例（独立测试集）。
-
 
 ## 2026-08-03 — 患者医疗信息 Agent 主线落地（秋招 MVP）
 
@@ -123,7 +122,6 @@
 - 前端 ChatPanel 增加任务标签与「依据 / 风险 / 下一步」卡片；结构化直答对「青霉素过敏 + 头孢慎用」冲突场景同时列出两条记录并转医生确认。
 - README 主叙事改为医疗信息 Agent 并补充安全边界与评估指标；面试准备文档补充主线问答与简历描述模板。
 - 全量 pytest 266 条通过，前端 `tsc + vite` 构建通过。
-
 
 ## 2026-08-03 — 秋招医疗信息 Agent 主线收敛
 
@@ -138,7 +136,6 @@
 - SSE Agent 调用改在线程中执行，增加 `STREAM_AGENT_TIMEOUT_SECONDS` 超时控制；模型超时或异常时返回安全降级回答，并继续发送 `token` 与 `done` 事件。
 - SSE 协议测试统一隔离外部模型调用，新增异常降级回归测试，避免网络状况导致测试等待与不稳定。
 - 同步项目文档中的 React 版本、测试数量、ORM 表数、MCP 工具数和路由模块数。
-
 
 ## 2026-08-01 — 面试演示入口与 Cloudflare 穿透
 
