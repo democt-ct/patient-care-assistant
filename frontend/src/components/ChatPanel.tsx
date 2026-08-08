@@ -157,7 +157,7 @@ export function TrajectoryView({ trajectory }: { trajectory?: AgentTrajectorySte
         onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
       >
-        <span className="agent-process-icon">🧠</span>
+        <span className="agent-process-icon">→</span>
         <span className="agent-process-label">思考链路 · {trajectory.length} 步</span>
         <span className={`agent-process-arrow ${expanded ? 'expanded' : ''}`}>▾</span>
       </button>
