@@ -2134,12 +2134,43 @@ p, li, blockquote, figcaption {
   color: var(--color-text-secondary);
 }
 
+.trajectory-view {
+  width: 100%;
+  max-width: none;
+  margin: var(--space-1) 0 0;
+  box-shadow: none;
+  border-style: dashed;
+}
+
+.trajectory-view .agent-process-toggle {
+  padding: var(--space-1) var(--space-2);
+  font-size: 0.72rem;
+  gap: var(--space-1);
+}
+
 .trajectory-view .agent-process-icon {
   animation: none;
+  width: 14px;
+  height: 14px;
+  font-size: 0.65rem;
+}
+
+.trajectory-view .agent-process-label {
+  font-size: 0.72rem;
+}
+
+.trajectory-view .agent-process-arrow {
+  font-size: 0.6rem;
+}
+
+.trajectory-view .agent-process-detail {
+  padding: var(--space-1) var(--space-2);
 }
 
 .trajectory-view .agent-process-step {
   flex-wrap: wrap;
+  padding: 2px 0;
+  font-size: 0.72rem;
 }
 
 .trajectory-view .step-duration {
