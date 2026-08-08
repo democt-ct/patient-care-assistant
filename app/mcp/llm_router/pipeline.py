@@ -21,15 +21,20 @@ from app.schemas.retrieval import (
 from app.services.agentic_retrieval import build_evidence_pack_from_structured_result
 from app.services.citation_validator import validate_answer
 from app.services.clarification import (
+    MID_RELIEF,
+    MID_RELIEF_QUESTION,
+    QUESTION_ADVICE,
     QUESTION_FLOW,
     RELIEF_QUESTION,
     UPGRADE_GUIDANCE,
     apply_answer,
     classify_relief,
     classify_vague_symptom,
+    classify_worsening,
     get_clarification_store,
     new_state,
     next_prompt,
+    symptom_cleared,
 )
 from app.services.evidence_judge import judge_evidence
 from app.services.evidence_policy import evaluate_evidence
@@ -143,6 +148,13 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
             result["risk_level"] = RiskLevel.ROUTINE.value
         state.result = result
 
+    def _question_with_advice(record) -> str:
+        prompt = QUESTION_FLOW[record.step_index][1]
+        advice = QUESTION_ADVICE.get(QUESTION_FLOW[record.step_index][0], "")
+        if advice:
+            return f"明白了，先帮你记下来。{advice} {prompt}"
+        return prompt
+
     def clarify_node(state: AgentGraphState) -> Optional[str]:
         question = state.context.get("question", "")
         session_id = state.context.get("session_id")
@@ -166,20 +178,61 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
             state.note("clarify:started")
             return None
 
-        # 问卷进行中：把当前消息当作上一题的答案并推进
+        # 任意一步：症状消失 → 清除问卷并收尾（更新语义：缓解触发整体清除）
+        if symptom_cleared(question):
+            store.clear(session_id)
+            _set_clarify_result(
+                state,
+                "好的，症状已经缓解。如果后续反复或加重，请及时就医或再次联系。",
+                step=record.step_index,
+                completed=True,
+            )
+            state.note("clarify:cleared")
+            return None
+
+        # 任意一步：恶化信号 → 立即升级就医指引（按步风险评估）
+        if classify_worsening(question):
+            store.clear(session_id)
+            _set_clarify_result(
+                state,
+                UPGRADE_GUIDANCE,
+                step=record.step_index,
+                completed=True,
+                upgraded=True,
+            )
+            state.result["risk_level"] = RiskLevel.URGENT.value
+            state.result["next_action"] = NextAction.CONTACT_DOCTOR.value
+            state.note("clarify:escalated")
+            return None
+
+        # 等待中途缓解确认的回答：未缓解/无法判断都继续问卷，不在此升级
+        if record.waiting_mid_relief:
+            record.waiting_mid_relief = False
+            store.set(record)
+            _set_clarify_result(state, _question_with_advice(record), step=record.step_index, completed=False)
+            state.note("clarify:continue_after_mid_relief")
+            return None
+
+        # 问卷进行中：把当前消息当作上一题的答案并推进（关键字段覆盖+变更记录）
         if not record.completed_questionnaire():
-            prompt = apply_answer(record, question)
-            if prompt is None:
+            result_prompt = apply_answer(record, question)
+            if result_prompt == MID_RELIEF:
+                record.waiting_mid_relief = True
+                store.set(record)
+                _set_clarify_result(state, MID_RELIEF_QUESTION, step=record.step_index, completed=False)
+                state.note("clarify:mid_relief")
+                return None
+            if result_prompt is None:
                 record.relief_asked = True
                 store.set(record)
                 _set_clarify_result(state, RELIEF_QUESTION, step=record.step_index, completed=False)
             else:
                 store.set(record)
-                _set_clarify_result(state, prompt, step=record.step_index, completed=False)
+                _set_clarify_result(state, _question_with_advice(record), step=record.step_index, completed=False)
             state.note(f"clarify:step{record.step_index}")
             return None
 
-        # 问卷完成：等待「是否缓解」答复
+        # 问卷完成：等待「是否缓解」最终确认
         relief = classify_relief(question)
         store.clear(session_id)
         if relief is False:
