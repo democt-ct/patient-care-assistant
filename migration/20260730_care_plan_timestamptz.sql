@@ -20,3 +20,4 @@ ALTER TABLE care_cases
     ALTER COLUMN acknowledged_at TYPE TIMESTAMPTZ USING acknowledged_at AT TIME ZONE 'UTC',
     ALTER COLUMN resolved_at TYPE TIMESTAMPTZ USING resolved_at AT TIME ZONE 'UTC',
     ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at AT TIME ZONE 'UTC',
+    ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at AT TIME ZONE 'UTC';

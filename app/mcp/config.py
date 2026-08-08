@@ -240,14 +240,15 @@ class OpenAICompatChatClient:
 
             except APIError as exc:
                 last_error = exc
-                if attempt < self.MAX_RETRIES - 1 and exc.status_code and exc.status_code >= 500:
+                status_code = getattr(exc, "status_code", None)
+                message = getattr(exc, "message", None) or str(exc)
+                # APIConnectionError 是 APIError 子类但没有 status_code；连接错误按可重试处理
+                if attempt < self.MAX_RETRIES - 1 and (status_code is None or status_code >= 500):
                     delay = self.RETRY_BASE_DELAY * (2 ** attempt)
-                    _log_retry(attempt, delay, f"APIError HTTP {exc.status_code}: {exc.message}")
+                    _log_retry(attempt, delay, f"APIError HTTP {status_code}: {message}")
                     time.sleep(delay)
                     continue
-                raise RuntimeError(
-                    f"LLM 调用失败 (HTTP {exc.status_code}): {exc.message}"
-                ) from exc
+                raise RuntimeError(f"LLM 调用失败 (HTTP {status_code}): {message}") from exc
 
         raise RuntimeError(
             f"LLM 调用在 {self.MAX_RETRIES} 次重试后全部失败: {last_error}"
