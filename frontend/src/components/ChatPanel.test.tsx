@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
-import { ACTION_LABELS, ContractCard, RISK_LABELS, TASK_LABELS } from './ChatPanel';
+import { ACTION_LABELS, ContractCard, NODE_LABELS, RISK_LABELS, TASK_LABELS, TrajectoryView } from './ChatPanel';
 
 
 describe('输出契约标签映射', () => {
@@ -46,5 +46,35 @@ describe('ContractCard 渲染', () => {
   it('无契约字段时不渲染', () => {
     const { container } = render(<ContractCard message={{ role: 'assistant', content: '回答' }} />);
     expect(container.querySelector('.contract-card')).toBeNull();
+  });
+});
+
+describe('思考链路（TrajectoryView）', () => {
+  it('节点标签映射完整', () => {
+    expect(NODE_LABELS.safety).toBe('安全检查');
+    expect(NODE_LABELS.task_route).toBe('任务路由');
+    expect(NODE_LABELS.evidence_check).toBe('证据判定');
+    expect(NODE_LABELS.citation_validate).toBe('引用校验');
+  });
+
+  it('无轨迹时不渲染', () => {
+    const { container } = render(<TrajectoryView />);
+    expect(container.querySelector('.trajectory-view')).toBeNull();
+  });
+
+  it('点击按钮展开逐步流程', () => {
+    render(
+      <TrajectoryView
+        trajectory={[
+          { node: 'safety', phase: 'safety', status: 'completed', duration_ms: 12, summary: 'allowed' },
+          { node: 'task_route', phase: 'classify', status: 'completed', duration_ms: 8, summary: 'task:general_health_education' },
+        ]}
+      />,
+    );
+    const button = screen.getByRole('button', { name: /思考链路/ });
+    expect(button).toBeTruthy();
+    fireEvent.click(button);
+    expect(screen.getByText('安全检查')).toBeTruthy();
+    expect(screen.getByText('任务路由')).toBeTruthy();
   });
 });

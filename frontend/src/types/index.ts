@@ -135,6 +135,15 @@ export type DemoRole = 'patient' | 'clinician' | 'coordinator';
 // 聊天消息
 // ============================================================
 
+export interface AgentTrajectoryStep {
+  node: string;
+  phase: string;
+  status: string;
+  duration_ms?: number;
+  summary?: string;
+  next_node?: string | null;
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -143,6 +152,8 @@ export interface ChatMessage {
   speech_url?: string;
   /** A user-safe summary of the completed agent workflow for this answer. */
   process?: AgentProcessState;
+  /** Agent Graph 思考链路：每个执行节点的安全摘要（不含病历原文与私有推理）。 */
+  agent_trajectory?: AgentTrajectoryStep[];
   /** 统一输出契约：依据 / 风险 / 下一步 / 任务类型 */
   risk_level?: string;
   next_action?: string;
@@ -211,6 +222,7 @@ export interface AgentQueryResponse {
   next_action?: string;
   evidence_summary?: string;
   task_route?: Record<string, unknown>;
+  agent_trajectory?: AgentTrajectoryStep[];
   citation_report?: {
     checked?: boolean;
     valid?: boolean;

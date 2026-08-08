@@ -2134,6 +2134,21 @@ p, li, blockquote, figcaption {
   color: var(--color-text-secondary);
 }
 
+.trajectory-view .agent-process-icon {
+  animation: none;
+}
+
+.trajectory-view .agent-process-step {
+  flex-wrap: wrap;
+}
+
+.trajectory-view .step-duration {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 @keyframes agent-process-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }

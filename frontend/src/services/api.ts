@@ -4,6 +4,7 @@ import type {
   VisitRecord,
   PatientProfile,
   AgentQueryResponse,
+  AgentTrajectoryStep,
   ConversationSession,
   ChatMessage,
   MemoryDebugPayload,
@@ -252,6 +253,7 @@ export const agentApi = {
         next_action?: string;
         evidence_summary?: string;
         task_route?: Record<string, unknown>;
+        agent_trajectory?: AgentTrajectoryStep[];
         citation_report?: Record<string, unknown>;
       }) => void;
       onError?: (detail: string) => void;

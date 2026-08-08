@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAppState } from '../context/AppContext';
 import { agentApi } from '../services/api';
-import type { ChatMessage, AgentProcessState } from '../types';
+import type { ChatMessage, AgentProcessState, AgentTrajectoryStep } from '../types';
 
 // Code block with copy button
 function CodeBlock({ children, className }: { children?: React.ReactNode; className?: string }) {
@@ -49,6 +49,18 @@ const PHASE_LABELS: Record<string, string> = {
   image_analysis: '图片理解',
   answer: '回答生成',
   tool: '信息查询',
+};
+
+// Agent Graph 节点 → 用户可读标签（思考链路）
+export const NODE_LABELS: Record<string, string> = {
+  safety: '安全检查',
+  task_route: '任务路由',
+  clarify: '症状澄清',
+  retrieval: '证据检索',
+  generate: '回答生成',
+  evidence_check: '证据判定',
+  citation_validate: '引用校验',
+  output_assemble: '输出装配',
 };
 
 export const TASK_LABELS: Record<string, string> = {
@@ -123,6 +135,42 @@ function ExecutionSteps({ process }: { process: AgentProcessState }) {
               <span className="step-message">已完成所需信息查询</span>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatDuration(ms?: number): string {
+  if (ms == null) return '';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+export function TrajectoryView({ trajectory }: { trajectory?: AgentTrajectoryStep[] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!trajectory || trajectory.length === 0) return null;
+  return (
+    <div className="agent-process-card trajectory-view">
+      <button
+        className="agent-process-toggle"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+      >
+        <span className="agent-process-icon">🧠</span>
+        <span className="agent-process-label">思考链路 · {trajectory.length} 步</span>
+        <span className={`agent-process-arrow ${expanded ? 'expanded' : ''}`}>▾</span>
+      </button>
+      {expanded && (
+        <div className="agent-process-detail trajectory-detail">
+          {trajectory.map((step, index) => (
+            <div key={`${step.node}-${index}`} className="agent-process-step">
+              <span className="step-icon">{index + 1}</span>
+              <span className="step-phase">{NODE_LABELS[step.node] || step.node}</span>
+              <span className="step-duration">{formatDuration(step.duration_ms)}</span>
+              <span className="step-message">{step.summary || step.status}</span>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -318,6 +366,7 @@ export function ChatPanel() {
                 created_at: new Date().toISOString(),
                 speech_url: data.speech_text ? undefined : undefined,
                 process: completedProcess,
+                agent_trajectory: data.agent_trajectory,
                 risk_level: data.risk_level,
                 next_action: data.next_action,
                 evidence_summary: data.evidence_summary,
@@ -536,6 +585,8 @@ export function ChatPanel() {
                   {msg.role === 'assistant' && msg.process && (
                     <ExecutionSteps process={msg.process} />
                   )}
+
+                  {msg.role === 'assistant' && <TrajectoryView trajectory={msg.agent_trajectory} />}
 
                   {/* Message actions */}
                   <div className="chat-msg-actions">

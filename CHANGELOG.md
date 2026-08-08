@@ -1,5 +1,12 @@
 # CHANGELOG — 患者照护助手
 
+## 2026-08-08 — 前端：聊天回答新增「思考链路」可视化
+
+- SSE done 事件新增 `agent_trajectory` 与 `stream_phases` 字段（`stream_routes.py`），同时修复该文件历史遗留的 `\r\r\n` 双 CR 换行损坏。
+- 前端类型扩展：`AgentTrajectoryStep`、`ChatMessage.agent_trajectory`、`AgentQueryResponse.agent_trajectory`、`queryStream onDone` 透传。
+- ChatPanel 新增 `TrajectoryView`：回答下方「🧠 思考链路」按钮，点击展开 Agent Graph 每一步（安全检查/任务路由/症状澄清/证据检索/回答生成/证据判定/引用校验/输出装配），含耗时与节点摘要；无轨迹时自动隐藏。
+- 新增 3 条 Vitest（节点标签映射、空轨迹不渲染、点击展开）；前端 7 条 Vitest 与 `tsc + vite build` 通过；后端 pytest 338 条通过。
+
 ## 2026-08-08 — V2 阶段 9：症状对话树升级（按步评估 + 中途缓解 + 更新语义）
 
 - 模糊主诉清单扩展：新增 头疼 / 头胀 / 头部不适 / 晕眩，覆盖“我头疼是怎么回事”这类表述。
