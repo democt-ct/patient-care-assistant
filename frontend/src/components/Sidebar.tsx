@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useAppState } from '../context/AppContext';
+import { useAppState } from '../context/appStateContext';
 import { patientApi, memoryApi } from '../services/api';
 import type { ConversationSession } from '../types';
 
@@ -115,7 +115,7 @@ export function Sidebar({ onClose }: SidebarProps) {
     closeOnMobile();
   };
 
-  const navigate = (view: 'dashboard' | 'care' | 'chat' | 'clinician' | 'coordinator', chatMode?: 'general' | 'memory') => {
+  const navigate = (view: 'dashboard' | 'chat', chatMode?: 'general' | 'memory') => {
     if (chatMode) dispatch({ type: 'SET_CHAT_MODE', payload: chatMode });
     dispatch({ type: 'SET_VIEW', payload: view });
     closeOnMobile();
@@ -165,14 +165,9 @@ export function Sidebar({ onClose }: SidebarProps) {
           <button className={`workspace-nav-item ${state.currentView === 'dashboard' ? 'active' : ''}`} onClick={() => navigate('dashboard')}>
             <span className="workspace-nav-icon">⌂</span>健康概览
           </button>
-          <button className={`workspace-nav-item ${state.currentView === 'care' ? 'active' : ''}`} onClick={() => navigate('care')}>
-            <span className="workspace-nav-icon">✓</span>照护计划
-          </button>
           <button className={`workspace-nav-item ${state.currentView === 'chat' ? 'active' : ''}`} onClick={() => navigate('chat', state.patientId ? 'memory' : 'general')}>
             <span className="workspace-nav-icon">✦</span>智能问诊
           </button>
-          {state.demoRole !== 'patient' && <button className={`workspace-nav-item ${state.currentView === 'coordinator' ? 'active' : ''}`} onClick={() => navigate('coordinator')}><span className="workspace-nav-icon">↗</span>协作工作台</button>}
-          {state.demoRole === 'clinician' && <button className={`workspace-nav-item ${state.currentView === 'clinician' ? 'active' : ''}`} onClick={() => navigate('clinician')}><span className="workspace-nav-icon">▣</span>医生审核</button>}
         </nav>
 
         <button className="sidebar-new-chat" onClick={handleNewChat}>

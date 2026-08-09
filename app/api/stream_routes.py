@@ -7,6 +7,7 @@ SSE 流式响应端点 —— 为 Agent 问答提供打字机效果。
 
 import asyncio
 import json
+import logging
 import os
 import time
 from typing import AsyncGenerator
@@ -40,6 +41,7 @@ from app.services.memory_extraction_service import (
 )
 
 router = APIRouter(prefix="/api/v1/mcp/agent", tags=["智能问答与工具（mcp-server）"])
+logger = logging.getLogger(__name__)
 
 STREAM_AGENT_TIMEOUT_SECONDS = float(os.getenv("STREAM_AGENT_TIMEOUT_SECONDS", "20"))
 
@@ -127,45 +129,58 @@ async def _agent_stream_generator(
     # ── Phase 3: Run agent (streaming) ──
     yield _sse_event("status", {"phase": "agent", "message": "正在分析问题..."})
 
-    # Phase callback: push real-time SSE events as the agent pipeline progresses
-    def _on_phase(phase: str, message: str):
-        # This will be called synchronously from within run_agent_tool_query_stream.
-        # We store events and yield them after the call returns, since we can't
-        # yield from inside a sync callback in an async generator.
-        pass
-
-    _pending_events: list = []
+    # Graph 在工作线程中同步执行。通过线程安全队列将节点开始事件即时送回
+    # async generator，避免“Agent 已完成后才补发所有执行步骤”的伪实时展示。
+    event_loop = asyncio.get_running_loop()
+    phase_events: asyncio.Queue[tuple[str, dict]] = asyncio.Queue()
 
     def _phase_callback(phase: str, message: str):
-        _pending_events.append(("phase", {"phase": phase, "message": message}))
+        try:
+            event_loop.call_soon_threadsafe(
+                phase_events.put_nowait,
+                ("phase", {"phase": phase, "message": message, "status": "active", "timestamp": time.time()}),
+            )
+        except RuntimeError:
+            # 请求已结束时，后台线程的迟到事件无需再写入。
+            pass
 
-    try:
-        result = await asyncio.wait_for(
-            asyncio.to_thread(
-                run_agent_tool_query_stream,
-                question=question,
-                on_phase=_phase_callback,
-                auth_token=auth_token,
-                patient_id=patient_id,
-                hospital_id=hospital_id,
-                chat_mode=chat_mode,
-                session_id=session_id,
-                conversation_context=conversation_context,
-                risk_signals=risk_signals,
-                personalization=personalization,
-            ),
-            timeout=STREAM_AGENT_TIMEOUT_SECONDS,
+    agent_task = asyncio.create_task(
+        asyncio.to_thread(
+            run_agent_tool_query_stream,
+            question=question,
+            on_phase=_phase_callback,
+            auth_token=auth_token,
+            patient_id=patient_id,
+            hospital_id=hospital_id,
+            chat_mode=chat_mode,
+            session_id=session_id,
+            conversation_context=conversation_context,
+            risk_signals=risk_signals,
+            personalization=personalization,
         )
+    )
+    try:
+        async with asyncio.timeout(STREAM_AGENT_TIMEOUT_SECONDS):
+            while not agent_task.done():
+                try:
+                    event_type, event_data = await asyncio.wait_for(phase_events.get(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    continue
+                yield _sse_event(event_type, event_data)
+            result = await agent_task
     except asyncio.TimeoutError:
+        agent_task.cancel()
         yield _sse_event("error", {"detail": "智能问答服务响应超时，已返回安全降级提示"})
         result = _fallback_stream_result(question)
     except Exception:
+        logger.exception("Streaming agent execution failed; returning safe fallback")
         yield _sse_event("error", {"detail": "智能问答服务暂时不可用，已返回安全降级提示"})
         result = _fallback_stream_result(question)
 
-    # Yield buffered phase events
-    for event_type, data in _pending_events:
-        yield _sse_event(event_type, data)
+    # 线程结束前最后写入队列的事件也要发送，避免丢失末尾节点。
+    while not phase_events.empty():
+        event_type, event_data = phase_events.get_nowait()
+        yield _sse_event(event_type, event_data)
 
     # ── Phase 4: Stream answer ──
     answer = result.get("answer", "") or ""
@@ -228,6 +243,8 @@ async def _agent_stream_generator(
         "risk_level": result.get("risk_level", "routine"),
         "next_action": result.get("next_action", "view_records"),
         "evidence_summary": result.get("evidence_summary", ""),
+        "evidence_coverage": result.get("evidence_coverage"),
+        "knowledge_sources": result.get("knowledge_sources", []),
         "task_route": result.get("task_route"),
         "citation_report": result.get("citation_report"),
         "agent_trajectory": result.get("agent_trajectory"),

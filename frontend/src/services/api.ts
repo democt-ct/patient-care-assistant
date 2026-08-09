@@ -8,9 +8,7 @@ import type {
   ConversationSession,
   ChatMessage,
   MemoryDebugPayload,
-  CarePlan,
-  CarePlanItem,
-  CareCase,
+  KnowledgeSource,
 } from '../types';
 
 // ============================================================
@@ -65,7 +63,7 @@ async function request<T = unknown>(
   } catch (err) {
     clearTimeout(timeoutId);
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('请求超时，请检查网络后重试');
+      throw new Error('请求超时，请检查网络后重试', { cause: err });
     }
     throw err;
   }
@@ -115,95 +113,6 @@ export const patientApi = {
   },
 };
 
-export const carePlanApi = {
-  list(patientId: string, authToken?: string): Promise<CarePlan[]> {
-    const auth = authToken ? `&auth_token=${encodeURIComponent(authToken)}` : '';
-    return request(`/api/v1/care-plans?patient_id=${encodeURIComponent(patientId)}${auth}`);
-  },
-  generate(patientId: string, sourceType: 'visit_record' | 'medical_record', sourceId: string, authToken?: string): Promise<CarePlan> {
-    const auth = authToken ? `&auth_token=${encodeURIComponent(authToken)}` : '';
-    return request(`/api/v1/care-plans/generate?patient_id=${encodeURIComponent(patientId)}${auth}`, {
-      method: 'POST',
-      body: JSON.stringify({ patient_id: patientId, source_type: sourceType, source_id: sourceId }),
-    });
-  },
-  confirm(planId: string, patientId: string, authToken?: string): Promise<CarePlan> {
-    const auth = authToken ? `&auth_token=${encodeURIComponent(authToken)}` : '';
-    return request(`/api/v1/care-plans/${encodeURIComponent(planId)}/confirm?patient_id=${encodeURIComponent(patientId)}${auth}`, { method: 'POST' });
-  },
-  acknowledgeItem(itemId: string, patientId: string, authToken?: string): Promise<CarePlanItem> {
-    const auth = authToken ? `&auth_token=${encodeURIComponent(authToken)}` : '';
-    return request(`/api/v1/care-plans/items/${encodeURIComponent(itemId)}/acknowledge?patient_id=${encodeURIComponent(patientId)}${auth}`, {
-      method: 'POST',
-    });
-  },
-  updateItem(
-    itemId: string,
-    patientId: string,
-    status: 'pending' | 'completed' | 'skipped' | 'snoozed' | 'needs_help',
-    note?: string,
-    snoozedUntil?: string,
-    authToken?: string,
-  ): Promise<CarePlanItem> {
-    const auth = authToken ? `&auth_token=${encodeURIComponent(authToken)}` : '';
-    return request(`/api/v1/care-plans/items/${encodeURIComponent(itemId)}?patient_id=${encodeURIComponent(patientId)}${auth}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ patient_id: patientId, status, note, snoozed_until: snoozedUntil }),
-    });
-  },
-  listCases(hospitalId: string, status?: string, coordinatorKey?: string): Promise<CareCase[]> {
-    const params = new URLSearchParams({ hospital_id: hospitalId });
-    if (status) params.set('status', status);
-    return request(`/api/v1/care-plans/cases/queue?${params}`, {
-      headers: coordinatorKey ? { 'X-Care-Coordinator-Key': coordinatorKey } : undefined,
-    });
-  },
-  acknowledgeCase(
-    caseId: string,
-    hospitalId: string,
-    assigneeId: string,
-    coordinatorNote?: string,
-    coordinatorKey?: string,
-  ): Promise<CareCase> {
-    return request(`/api/v1/care-plans/cases/${encodeURIComponent(caseId)}/acknowledge?hospital_id=${encodeURIComponent(hospitalId)}`, {
-      method: 'POST',
-      headers: coordinatorKey ? { 'X-Care-Coordinator-Key': coordinatorKey } : undefined,
-      body: JSON.stringify({ assignee_id: assigneeId, coordinator_note: coordinatorNote }),
-    });
-  },
-  resolveCase(
-    caseId: string,
-    hospitalId: string,
-    assigneeId: string,
-    coordinatorNote?: string,
-    coordinatorKey?: string,
-  ): Promise<CareCase> {
-    return request(`/api/v1/care-plans/cases/${encodeURIComponent(caseId)}/resolve?hospital_id=${encodeURIComponent(hospitalId)}`, {
-      method: 'POST',
-      headers: coordinatorKey ? { 'X-Care-Coordinator-Key': coordinatorKey } : undefined,
-      body: JSON.stringify({ assignee_id: assigneeId, coordinator_note: coordinatorNote }),
-    });
-  },
-  listReviewQueue(hospitalId: string, clinicianKey?: string): Promise<CarePlan[]> {
-    return request(`/api/v1/care-plans/review-queue?hospital_id=${encodeURIComponent(hospitalId)}`, {
-      headers: clinicianKey ? { 'X-Clinician-Key': clinicianKey } : undefined,
-    });
-  },
-  publishPlan(
-    planId: string,
-    hospitalId: string,
-    clinicianId: string,
-    clinicianNote?: string,
-    clinicianKey?: string,
-  ): Promise<CarePlan> {
-    return request(`/api/v1/care-plans/${encodeURIComponent(planId)}/publish?hospital_id=${encodeURIComponent(hospitalId)}`, {
-      method: 'POST',
-      headers: clinicianKey ? { 'X-Clinician-Key': clinicianKey } : undefined,
-      body: JSON.stringify({ clinician_id: clinicianId, clinician_note: clinicianNote }),
-    });
-  },
-};
-
 // ============================================================
 // Agent / 聊天 API
 // ============================================================
@@ -235,7 +144,7 @@ export const agentApi = {
     },
     callbacks: {
       onStatus?: (phase: string, message: string) => void;
-      onPhase?: (phase: string, message: string) => void;
+      onPhase?: (phase: string, message: string, status?: 'active' | 'done') => void;
       onIntent?: (intent: string, confidence: number) => void;
       onPlanning?: (plan: Record<string, unknown>) => void;
       onToolExecution?: (tool: string) => void;
@@ -252,6 +161,7 @@ export const agentApi = {
         risk_level?: string;
         next_action?: string;
         evidence_summary?: string;
+        knowledge_sources?: KnowledgeSource[];
         task_route?: Record<string, unknown>;
         agent_trajectory?: AgentTrajectoryStep[];
         citation_report?: Record<string, unknown>;
@@ -260,8 +170,9 @@ export const agentApi = {
     },
     signal?: AbortSignal,
   ): Promise<void> {
-    return new Promise<void>(async (resolve, reject) => {
-      try {
+    return new Promise<void>((resolve, reject) => {
+      void (async () => {
+        try {
         const resp = await fetch(`${BASE}/api/v1/mcp/agent/query-stream`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -314,7 +225,7 @@ export const agentApi = {
                         callbacks.onStatus?.(payload.phase, payload.message);
                         break;
                       case 'phase':
-                        callbacks.onPhase?.(payload.phase, payload.message);
+                        callbacks.onPhase?.(payload.phase, payload.message, payload.status);
                         break;
                       case 'intent':
                         callbacks.onIntent?.(payload.intent || '', payload.confidence || 0);
@@ -372,9 +283,10 @@ export const agentApi = {
         };
 
         readLoop();
-      } catch (err) {
-        reject(err);
-      }
+        } catch (err) {
+          reject(err);
+        }
+      })();
     });
   },
 

@@ -55,82 +55,6 @@ export interface PatientProfile {
   identity?: Record<string, unknown>;
 }
 
-export interface CarePlanItemEvent {
-  id: string;
-  event_type: string;
-  note: string | null;
-  actor_type: string;
-  created_at: string;
-}
-
-export interface CarePlanItem {
-  id: string;
-  care_plan_id: string;
-  patient_id: string;
-  task_type: string;
-  title: string;
-  instructions: string | null;
-  priority: string;
-  status: string;
-  due_at: string | null;
-  evidence_source_type: string;
-  evidence_source_id: string;
-  evidence_excerpt: string;
-  needs_patient_confirmation: boolean;
-  follow_up_status: string;
-  patient_acknowledged_at: string | null;
-  last_patient_response_at: string | null;
-  last_reminded_at: string | null;
-  next_reminder_at: string | null;
-  reminder_count: number;
-  execution_evidence_type: string | null;
-  needs_follow_up: boolean;
-  is_overdue: boolean;
-  snoozed_until: string | null;
-  is_snoozed: boolean;
-  completed_at: string | null;
-  created_at: string;
-  updated_at: string;
-  events: CarePlanItemEvent[];
-}
-
-export interface CarePlan {
-  id: string;
-  patient_id: string;
-  hospital_id: string;
-  source_type: string;
-  source_id: string;
-  title: string;
-  status: string;
-  confirmed_at: string | null;
-  created_at: string;
-  updated_at: string;
-  pending_count: number;
-  overdue_count: number;
-  items: CarePlanItem[];
-}
-
-export interface CareCase {
-  id: string;
-  patient_id: string;
-  hospital_id: string;
-  care_plan_item_id: string;
-  care_plan_item_title: string;
-  care_plan_item_due_at: string | null;
-  reason: string;
-  priority: string;
-  status: 'open' | 'acknowledged' | 'resolved' | string;
-  patient_note: string | null;
-  coordinator_note: string | null;
-  assignee_id: string | null;
-  acknowledged_at: string | null;
-  resolved_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export type DemoRole = 'patient' | 'clinician' | 'coordinator';
-
 // ============================================================
 // 聊天消息
 // ============================================================
@@ -142,6 +66,14 @@ export interface AgentTrajectoryStep {
   duration_ms?: number;
   summary?: string;
   next_node?: string | null;
+}
+
+export interface KnowledgeSource {
+  source_id?: string;
+  source_name?: string;
+  source_url?: string;
+  version?: string;
+  title?: string;
 }
 
 export interface ChatMessage {
@@ -158,6 +90,7 @@ export interface ChatMessage {
   risk_level?: string;
   next_action?: string;
   evidence_summary?: string;
+  knowledge_sources?: KnowledgeSource[];
   task_route?: Record<string, unknown>;
 }
 
@@ -211,6 +144,7 @@ export interface MemoryDebugPayload {
 
 export interface AgentQueryResponse {
   answer: string;
+  session_id?: string;
   speech_url?: string;
   image_analysis?: string;
   memory_debug?: MemoryDebugPayload;
@@ -221,6 +155,7 @@ export interface AgentQueryResponse {
   risk_level?: string;
   next_action?: string;
   evidence_summary?: string;
+  knowledge_sources?: KnowledgeSource[];
   task_route?: Record<string, unknown>;
   agent_trajectory?: AgentTrajectoryStep[];
   citation_report?: {
@@ -267,7 +202,7 @@ export interface ConversationSession {
 
 export type ChatMode = 'general' | 'memory';
 export type SpeechMode = 'browser' | 'tts';
-export type AppView = 'role' | 'dashboard' | 'chat' | 'patient' | 'care' | 'clinician' | 'coordinator';
+export type AppView = 'dashboard' | 'chat';
 export type Theme = 'light' | 'dark';
 
 export interface AppState {
@@ -277,7 +212,6 @@ export interface AppState {
   authToken: string;
   profileName: string;
   profilePhone: string;
-  demoRole: DemoRole | null;
 
   // 会话
   sessionId: string;
@@ -313,7 +247,6 @@ export interface AppState {
 
 export type AppAction =
   | { type: 'SET_PATIENT_CONTEXT'; payload: { patientId: string; hospitalId: string; authToken?: string; profileName?: string; profilePhone?: string } }
-  | { type: 'SET_DEMO_CONTEXT'; payload: { role: DemoRole; hospitalId: string; patientId?: string; profileName?: string } }
   | { type: 'CLEAR_PATIENT_CONTEXT' }
   | { type: 'SET_SESSION_ID'; payload: string }
   | { type: 'SET_GENERAL_SESSION_ID'; payload: string }

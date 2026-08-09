@@ -2023,19 +2023,19 @@ p, li, blockquote, figcaption {
    ============================================================ */
 
 .agent-process-card {
-  margin: 0 auto var(--space-3);
+  margin: 0 0 var(--space-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-surface);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
-  max-width: 420px;
-  width: calc(100% - var(--space-6) * 2);
+  max-width: min(100%, 460px);
+  width: fit-content;
 }
 
 .execution-steps {
-  width: 100%;
-  max-width: none;
+  width: fit-content;
+  max-width: min(100%, 520px);
   margin: var(--space-2) 0 0;
   box-shadow: none;
 }
@@ -2049,11 +2049,12 @@ p, li, blockquote, figcaption {
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  padding: var(--space-2) var(--space-3);
+  min-height: 30px;
+  padding: 5px var(--space-2);
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: 0.75rem;
   color: var(--color-text-secondary);
   text-align: left;
   transition: background 0.15s;
@@ -2099,7 +2100,7 @@ p, li, blockquote, figcaption {
 }
 
 .agent-process-detail {
-  padding: 0 var(--space-3) var(--space-2);
+  padding: 2px var(--space-2) 5px;
   border-top: 1px solid var(--color-border);
 }
 
@@ -2107,8 +2108,8 @@ p, li, blockquote, figcaption {
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
-  padding: var(--space-1) 0;
-  font-size: 0.78rem;
+  padding: 2px 0;
+  font-size: 0.72rem;
   color: var(--color-text-secondary);
 }
 
@@ -2124,9 +2125,9 @@ p, li, blockquote, figcaption {
   flex-shrink: 0;
   font-weight: 600;
   color: var(--color-text-muted);
-  min-width: 60px;
-  text-transform: uppercase;
-  font-size: 0.7rem;
+  min-width: 52px;
+  text-transform: none;
+  font-size: 0.68rem;
   letter-spacing: 0.02em;
 }
 
@@ -2135,8 +2136,8 @@ p, li, blockquote, figcaption {
 }
 
 .trajectory-view {
-  width: 100%;
-  max-width: none;
+  width: fit-content;
+  max-width: min(100%, 460px);
   margin: var(--space-1) 0 0;
   box-shadow: none;
   border-style: dashed;
@@ -3663,4 +3664,27 @@ p, li, blockquote, figcaption {
   font-size: 12px;
   line-height: 18px;
   color: var(--color-text-muted);
+}
+
+.contract-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.contract-sources::before {
+  content: '权威来源';
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.contract-sources a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.contract-sources a:hover {
+  text-decoration: underline;
 }

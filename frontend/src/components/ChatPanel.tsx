@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useAppState } from '../context/AppContext';
+import { useAppState } from '../context/appStateContext';
 import { agentApi } from '../services/api';
 import type { ChatMessage, AgentProcessState, AgentTrajectoryStep } from '../types';
+import { ACTION_LABELS, NODE_LABELS, RISK_LABELS, TASK_LABELS } from './chatLabels';
 
 // Code block with copy button
 function CodeBlock({ children, className }: { children?: React.ReactNode; className?: string }) {
@@ -49,13 +50,9 @@ const PHASE_LABELS: Record<string, string> = {
   image_analysis: '图片理解',
   answer: '回答生成',
   tool: '信息查询',
-};
-
-// Agent Graph 节点 → 用户可读标签（思考链路）
-export const NODE_LABELS: Record<string, string> = {
-  safety: '安全检查',
   task_route: '任务路由',
   clarify: '症状澄清',
+  symptom_assessment: '症状评估',
   retrieval: '证据检索',
   generate: '回答生成',
   evidence_check: '证据判定',
@@ -63,41 +60,33 @@ export const NODE_LABELS: Record<string, string> = {
   output_assemble: '输出装配',
 };
 
-export const TASK_LABELS: Record<string, string> = {
-  fact_verification: '病历事实核验',
-  medication_allergy_check: '用药过敏核对',
-  report_comprehension: '报告理解',
-  longitudinal_comparison: '纵向比较',
-  risk_triage: '风险分流',
-  visit_preparation: '就医准备',
-  general_health_education: '一般健康教育',
-};
-
-export const RISK_LABELS: Record<string, string> = {
-  routine: '常规',
-  urgent: '需关注',
-  emergency: '紧急',
-};
-
-export const ACTION_LABELS: Record<string, string> = {
-  continue_supplement: '补充信息',
-  view_records: '查看记录',
-  contact_doctor: '联系医生',
-  emergency_care: '紧急就医',
-};
-
 export function ContractCard({ message }: { message: ChatMessage }) {
   const task = typeof message.task_route?.task === 'string' ? message.task_route.task : undefined;
   const risk = message.risk_level;
   const next = message.next_action;
   const evidence = message.evidence_summary;
-  if (!task && !risk && !next && !evidence) return null;
+  const sources = message.knowledge_sources || [];
+  if (!task && !risk && !next && !evidence && sources.length === 0) return null;
   return (
     <div className="contract-card">
       {task && <span className="contract-chip contract-chip-task">{TASK_LABELS[task] || task}</span>}
       {risk && <span className={`contract-chip contract-chip-risk ${risk}`}>{RISK_LABELS[risk] || risk}</span>}
       {next && <span className="contract-chip contract-chip-action">{ACTION_LABELS[next] || next}</span>}
       {evidence && <div className="contract-evidence">{evidence}</div>}
+      {sources.length > 0 && (
+        <div className="contract-sources" aria-label="医学知识来源">
+          {sources.map((source, index) => {
+            const label = source.title || source.source_name || `来源 ${index + 1}`;
+            return source.source_url ? (
+              <a key={source.source_id || source.source_url} href={source.source_url} target="_blank" rel="noreferrer">
+                {label}{source.version ? `（${source.version}）` : ''}
+              </a>
+            ) : (
+              <span key={source.source_id || `${label}-${index}`}>{label}</span>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -210,13 +199,6 @@ export function ChatPanel() {
     }
   }, [messages]);
 
-  // Reset input on mode switch
-  useEffect(() => {
-    setInput('');
-    setImageFile(null);
-    setImagePreview('');
-  }, [state.chatMode]);
-
   const addMessage = (msg: ChatMessage) => {
     if (isMemory) {
       dispatch({ type: 'ADD_CHAT_MESSAGE', payload: msg });
@@ -226,6 +208,17 @@ export function ChatPanel() {
   };
 
   const sendQuery = async (text: string, file?: File | null) => {
+    const currentSessionId = (() => {
+      const existing = isMemory ? state.sessionId : state.generalSessionId;
+      if (existing) return existing;
+      const created = globalThis.crypto?.randomUUID?.() || `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      dispatch({ type: isMemory ? 'SET_SESSION_ID' : 'SET_GENERAL_SESSION_ID', payload: created });
+      return created;
+    })();
+    const persistSessionId = (sessionId?: string) => {
+      if (!sessionId) return;
+      dispatch({ type: isMemory ? 'SET_SESSION_ID' : 'SET_GENERAL_SESSION_ID', payload: sessionId });
+    };
     const userMsg: ChatMessage = {
       role: 'user',
       content: text || '[图片]',
@@ -251,7 +244,7 @@ export function ChatPanel() {
           patient_id: state.patientId || undefined,
           hospital_id: state.hospitalId || undefined,
           auth_token: state.authToken || undefined,
-          session_id: isMemory ? state.sessionId : state.generalSessionId || undefined,
+          session_id: currentSessionId,
           chat_mode: state.chatMode,
         });
         setImageFile(null);
@@ -266,6 +259,7 @@ export function ChatPanel() {
           risk_level: result.risk_level,
           next_action: result.next_action,
           evidence_summary: result.evidence_summary,
+          knowledge_sources: result.knowledge_sources,
           task_route: result.task_route,
           process: {
             phases: [
@@ -278,6 +272,7 @@ export function ChatPanel() {
           },
         };
         addMessage(assistantMsg);
+        persistSessionId(result.session_id || currentSessionId);
         dispatch({ type: 'SET_LAST_ANSWER', payload: result.answer });
 
         if (result.memory_debug) {
@@ -295,7 +290,7 @@ export function ChatPanel() {
             patient_id: state.patientId || undefined,
             hospital_id: state.hospitalId || undefined,
             auth_token: state.authToken || undefined,
-            session_id: isMemory ? state.sessionId : state.generalSessionId || undefined,
+            session_id: currentSessionId,
             chat_mode: state.chatMode,
           },
           {
@@ -309,14 +304,16 @@ export function ChatPanel() {
                 return { ...(previous || { phases: [] }), phases };
               });
             },
-            onPhase: (phase, message) => {
+            onPhase: (phase, message, status = 'active') => {
               updateAgentProcess((previous) => {
-                const phases = previous ? [...previous.phases] : [];
-                const existing = phases.findIndex(p => p.phase === phase);
+                const phases = previous
+                  ? previous.phases.map((item) => item.status === 'active' ? { ...item, status: 'done' as const } : item)
+                  : [];
+                const existing = phases.findIndex(p => p.phase === phase && p.message === message);
                 if (existing >= 0) {
-                  phases[existing] = { phase, message, status: 'done' };
+                  phases[existing] = { phase, message, status };
                 } else {
-                  phases.push({ phase, message, status: 'done' });
+                  phases.push({ phase, message, status });
                 }
                 return { ...(previous || { phases: [] }), phases };
               });
@@ -370,9 +367,11 @@ export function ChatPanel() {
                 risk_level: data.risk_level,
                 next_action: data.next_action,
                 evidence_summary: data.evidence_summary,
+                knowledge_sources: data.knowledge_sources,
                 task_route: data.task_route,
               };
               addMessage(assistantMsg);
+              persistSessionId(data.session_id || currentSessionId);
               dispatch({ type: 'SET_LAST_ANSWER', payload: finalAnswer });
 
               if (data.memory_debug) {

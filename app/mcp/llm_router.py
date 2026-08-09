@@ -853,6 +853,16 @@ def _build_default_plan_candidates(question: str, *, intent_state: Dict[str, Any
                 ],
             }
         ]
+    if intent == "general_medical_question":
+        # General education has no patient-bound tool requirement.  The answer
+        # model is still used, but avoid a second LLM round merely to create an
+        # empty plan.
+        return [{
+            "plan_id": "general_medical_direct",
+            "confidence": 1.0,
+            "reasoning_summary": "Answer general medical education without tool execution.",
+            "steps": [],
+        }]
     return []
 
 
@@ -1817,7 +1827,7 @@ def _structured_fact_tool_for_question(question: str) -> Optional[str]:
         "下次什么时候", "最近一次", "上次发热", "上次在", "上次去", "上次看", "哪天",
     )):
         return "get_visit_records"
-    if any(keyword in normalized for keyword in ("诊断", "什么病", "疾病", "吃什么药", "什么药", "用药", "药物", "手术", "血糖", "hba1c", "糖化血红蛋白", "布洛芬")):
+    if any(keyword in normalized for keyword in ("诊断", "什么病", "疾病", "吃什么药", "什么药", "用药", "药物", "手术", "血糖", "hba1c", "糖化血红蛋白", "低密度脂蛋白", "ldl", "胆固醇", "布洛芬")):
         return "get_medical_records"
     return None
 
@@ -1849,15 +1859,44 @@ def _try_structured_fact_query(
         tool_name=tool_name,
         tool_result=tool_result,
     )
-    if not answer:
-        return None
-
     intent = {
         "get_medical_records": "medical_records_query",
         "get_visit_records": "visit_records_query",
         "get_patient_profile": "patient_profile_summary",
     }[tool_name]
     observation = _summarize_tool_observation(tool_name, tool_result)
+    if not answer:
+        # An explicit record lookup that found no matching field must not fall
+        # through to the LLM planner.  Doing so causes slow retries and can
+        # replace an honest absence with an unrelated record summary.
+        return {
+            "question": question,
+            "answer": (
+                f"在已授权的记录中未检索到与“{question}”直接对应的信息。"
+                "请核对原始检查/病历记录；如需用于诊疗决策，请向医生确认。"
+            ),
+            "speech_text": "当前已授权记录中未检索到对应信息，请核对原始病历或向医生确认。",
+            "image_analysis": None,
+            "intent": intent,
+            "intent_confidence": 1.0,
+            "planning_strategy": "deterministic_structured_fact_absence",
+            "chosen_tool": tool_name,
+            "chosen_tools": [tool_name],
+            "tool_arguments": arguments,
+            "tool_result": tool_result,
+            "structured_fact_missing": True,
+            "next_action": "contact_doctor",
+            "execution_trace": [],
+            "planning": {
+                "intent_reasoning": "Matched an explicit structured-record lookup with no matching field.",
+                "focus": [], "latest_only": False, "candidates": [],
+                "chosen_plan": {"plan_id": "deterministic_structured_fact_absence", "steps": []},
+                "finish_reasoning": "Returned the documented absence without model generation.",
+            },
+            "answer_confidence": 1.0,
+            "confidence_reason": "The requested field was not present in the retrieved structured record.",
+        }
+
     return {
         "question": question,
         "answer": answer,

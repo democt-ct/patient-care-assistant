@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 
-import { ACTION_LABELS, ContractCard, NODE_LABELS, RISK_LABELS, TASK_LABELS, TrajectoryView } from './ChatPanel';
+import { ContractCard, TrajectoryView } from './ChatPanel';
+import { ACTION_LABELS, NODE_LABELS, RISK_LABELS, TASK_LABELS } from './chatLabels';
 
 
 describe('输出契约标签映射', () => {
@@ -46,6 +47,27 @@ describe('ContractCard 渲染', () => {
   it('无契约字段时不渲染', () => {
     const { container } = render(<ContractCard message={{ role: 'assistant', content: '回答' }} />);
     expect(container.querySelector('.contract-card')).toBeNull();
+  });
+
+  it('渲染可点击的权威医学知识来源', () => {
+    render(
+      <ContractCard
+        message={{
+          role: 'assistant',
+          content: '回答',
+          knowledge_sources: [{
+            source_id: 'nhc_hypertension_2024',
+            source_name: '国家卫生健康委',
+            title: '高血压健康指导',
+            version: '2024-07-01',
+            source_url: 'https://www.nhc.gov.cn/example',
+          }],
+        }}
+      />,
+    );
+
+    const source = screen.getByRole('link', { name: '高血压健康指导（2024-07-01）' });
+    expect(source.getAttribute('href')).toBe('https://www.nhc.gov.cn/example');
   });
 });
 

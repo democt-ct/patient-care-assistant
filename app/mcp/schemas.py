@@ -145,7 +145,15 @@ class MCPAgentQueryResponse(BaseModel):
     session_state: Optional[str] = Field(default=None, description="Current FSM session state")
     risk_level: Optional[str] = Field(default=None, description="风险等级：routine / urgent / emergency")
     next_action: Optional[str] = Field(default=None, description="建议下一步动作")
+    clarification_required: Optional[bool] = Field(default=None, description="是否已进入症状澄清")
+    clarification_completed: Optional[bool] = Field(default=None, description="症状澄清是否已完成")
+    clarification_upgraded: Optional[bool] = Field(default=None, description="澄清期间是否因风险升级")
+    clarification_step: Optional[int] = Field(default=None, description="当前症状澄清步骤")
     evidence_summary: Optional[str] = Field(default=None, description="依据类型、日期和来源的简短说明")
+    knowledge_sources: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="回答引用的权威医学知识来源（机构、标题、版本与链接）",
+    )
     task_route: Optional[Dict[str, Any]] = Field(default=None, description="任务路由结果")
     citation_report: Optional[Dict[str, Any]] = Field(default=None, description="引用校验报告")
 

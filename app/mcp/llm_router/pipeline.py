@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from app.agent.graph import AgentGraph, AgentGraphState, AgentNode
 from app.config.rulebook_knowledge import rulebook_context_for
+from app.config.official_health_knowledge import official_health_context_for
 from app.mcp.llm_router.output_contract import assemble_output_contract
 from app.schemas.retrieval import (
     EvidenceCheck,
@@ -21,25 +23,22 @@ from app.schemas.retrieval import (
 from app.services.agentic_retrieval import build_evidence_pack_from_structured_result
 from app.services.citation_validator import validate_answer
 from app.services.clarification import (
-    MID_RELIEF,
-    MID_RELIEF_QUESTION,
-    QUESTION_ADVICE,
     QUESTION_FLOW,
-    RELIEF_QUESTION,
     UPGRADE_GUIDANCE,
     apply_answer,
-    classify_relief,
+    build_safe_symptom_guidance,
     classify_vague_symptom,
     classify_worsening,
     get_clarification_store,
     new_state,
-    next_prompt,
     symptom_cleared,
 )
 from app.services.evidence_judge import judge_evidence
 from app.services.evidence_policy import evaluate_evidence
 from app.services.response_guidance import embed_escalation_guidance, personalize_response
 from app.services.retrieval_router import route_question
+
+logger = logging.getLogger(__name__)
 
 _FACT_LABELS: dict[str, str] = {
     "allergy_history": "过敏史",
@@ -132,9 +131,17 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
         result = state.context.setdefault("candidate_result", {})
         result.update(
             {
+                "question": state.context.get("question", ""),
                 "answer": answer,
                 "intent": "clarification",
                 "chosen_tool": "clarification_flow",
+                "tool_arguments": {},
+                "tool_result": {
+                    "tool_name": "clarification_flow",
+                    "success": True,
+                    "data": {},
+                    "message": "症状最小信息澄清",
+                },
                 "clarification_required": True,
                 "clarification_completed": completed,
                 "clarification_upgraded": upgraded,
@@ -147,13 +154,6 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
             result["next_action"] = NextAction.CONTINUE_SUPPLEMENT.value
             result["risk_level"] = RiskLevel.ROUTINE.value
         state.result = result
-
-    def _question_with_advice(record) -> str:
-        prompt = QUESTION_FLOW[record.step_index][1]
-        advice = QUESTION_ADVICE.get(QUESTION_FLOW[record.step_index][0], "")
-        if advice:
-            return f"明白了，先帮你记下来。{advice} {prompt}"
-        return prompt
 
     def clarify_node(state: AgentGraphState) -> Optional[str]:
         question = state.context.get("question", "")
@@ -171,7 +171,7 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
                 store.set(record)
             _set_clarify_result(
                 state,
-                next_prompt(record) or RELIEF_QUESTION,
+                QUESTION_FLOW[0][1],
                 step=record.step_index,
                 completed=False,
             )
@@ -205,68 +205,52 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
             state.note("clarify:escalated")
             return None
 
-        # 等待中途缓解确认的回答：未缓解/无法判断都继续问卷，不在此升级
-        if record.waiting_mid_relief:
-            record.waiting_mid_relief = False
-            store.set(record)
-            _set_clarify_result(state, _question_with_advice(record), step=record.step_index, completed=False)
-            state.note("clarify:continue_after_mid_relief")
-            return None
-
-        # 问卷进行中：把当前消息当作上一题的答案并推进（关键字段覆盖+变更记录）
+        # 把患者补充作为上一轮追问的答案；信息满足后转入症状评估节点，
+        # 而不是继续执行一组固定问题。
         if not record.completed_questionnaire():
-            result_prompt = apply_answer(record, question)
-            if result_prompt == MID_RELIEF:
-                record.waiting_mid_relief = True
-                store.set(record)
-                _set_clarify_result(state, MID_RELIEF_QUESTION, step=record.step_index, completed=False)
-                state.note("clarify:mid_relief")
-                return None
-            if result_prompt is None:
-                record.relief_asked = True
-                store.set(record)
-                _set_clarify_result(state, RELIEF_QUESTION, step=record.step_index, completed=False)
-            else:
-                store.set(record)
-                _set_clarify_result(state, _question_with_advice(record), step=record.step_index, completed=False)
-            state.note(f"clarify:step{record.step_index}")
-            return None
+            apply_answer(record, question)
+        state.context["clarification_record"] = record
+        state.note("clarify:minimum_facts_collected")
+        return "symptom_assessment"
 
-        # 问卷完成：等待「是否缓解」最终确认
-        relief = classify_relief(question)
-        store.clear(session_id)
-        if relief is False:
-            _set_clarify_result(
-                state,
-                UPGRADE_GUIDANCE,
-                step=len(QUESTION_FLOW),
-                completed=True,
-                upgraded=True,
-            )
-            state.result["risk_level"] = RiskLevel.URGENT.value
-            state.result["next_action"] = NextAction.CONTACT_DOCTOR.value
-            state.note("clarify:upgraded")
-            return None
-        if relief is True:
-            _set_clarify_result(
-                state,
-                "好的，如果症状反复或加重，请及时就医或再次联系。",
-                step=len(QUESTION_FLOW),
-                completed=True,
-            )
-            state.note("clarify:relieved")
-            return None
-        # 无法判断是否缓解：保守升级为就医指引
-        _set_clarify_result(
-            state,
-            UPGRADE_GUIDANCE,
-            step=len(QUESTION_FLOW),
-            completed=True,
-            upgraded=True,
+    def symptom_assessment_node(state: AgentGraphState) -> Optional[str]:
+        """Close the clarification loop with safe, actionable patient guidance."""
+        record = state.context.get("clarification_record")
+        if record is None:
+            return "retrieval"
+        session_id = state.context.get("session_id")
+        if session_id:
+            get_clarification_store().clear(session_id)
+        result = state.context.setdefault("candidate_result", {})
+        result.update(
+            {
+                "question": state.context.get("question", ""),
+                "answer": build_safe_symptom_guidance(record),
+                "intent": "symptom_consultation",
+                "chosen_tool": "symptom_assessment",
+                "tool_arguments": {"clarification_step": record.step_index},
+                "tool_result": {
+                    "tool_name": "symptom_assessment",
+                    "success": True,
+                    "data": {"clarification_step": record.step_index},
+                    "message": "已完成症状最小信息评估",
+                },
+                "clarification_required": True,
+                "clarification_completed": True,
+                "clarification_upgraded": False,
+                "clarification_step": record.step_index,
+                "planning": {
+                    "selected_action": "provide_safe_symptom_guidance",
+                    "reason": "已收集改变分流结果的最小症状信息，转为行动建议而非继续固定追问。",
+                },
+            }
         )
-        state.result["risk_level"] = RiskLevel.URGENT.value
-        state.result["next_action"] = NextAction.CONTACT_DOCTOR.value
-        state.note("clarify:unclear_upgraded")
+        assemble_output_contract(result)
+        result["risk_level"] = RiskLevel.ROUTINE.value
+        result["next_action"] = NextAction.MONITOR_SYMPTOMS.value
+        result["evidence_summary"] = "依据：患者当轮症状描述；未使用病历数据，未生成个体化诊断或用药方案。"
+        state.result = result
+        state.note("symptom_assessment:guidance_ready")
         return None
 
     def retrieval_node(state: AgentGraphState) -> Optional[str]:
@@ -284,6 +268,22 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
                 result.get("tool_result") or {},
                 state.context.get("route"),
             )
+            if result.get("structured_fact_missing"):
+                route = state.context.get("route")
+                state.context["evidence_check"] = EvidenceCheck(
+                    status=EvidenceStatus.MISSING,
+                    coverage=0.0,
+                    missing_facts=list(route.required_facts) if route else [],
+                    decision=EvidenceDecision.CLARIFY,
+                    attempt=1,
+                    max_attempts=1,
+                ).model_dump(mode="json")
+                state.note("direct:missing_record_field")
+                return "output_assemble"
+            # The answer is a deterministic rendering of structured records.
+            # Running an LLM judge here adds latency and a network dependency
+            # without contributing new evidence.
+            state.context["deterministic_direct"] = True
             return "evidence_check"
         state.note("no_exact_record_route")
         return "generate"
@@ -295,6 +295,17 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
             return "evidence_check"
         # V2 规则手册知识注入：已审核处理规范优先，患者事实块随后
         rulebook = rulebook_context_for(context.get("route"))
+        official_hits = official_health_context_for(context["question"], context.get("route"))
+        if official_hits:
+            official_block = "\n".join(
+                f"[{item['source_name']}｜{item['title']}｜{item['version']}] {item['content']}"
+                for item in official_hits
+            )
+            rulebook = (rulebook + "\n\n" if rulebook else "") + (
+                "以下为来源已核验的公共卫生健康教育内容，仅可用于一般健康教育和就医提示，"
+                "不得扩展为诊断、处方、剂量或停换药建议：\n" + official_block
+            )
+            context["evidence_pack"] = EvidencePack(knowledge_hits=official_hits)
         if rulebook:
             patient_block = context.get("conversation_context")
             merged = rulebook
@@ -302,24 +313,63 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
                 merged += "\n\n以下是从患者档案检索到的患者事实，仅用于核验，不得编造：\n" + patient_block
             context["conversation_context"] = merged
 
-        context["candidate_result"] = executor_run(
-            context["question"],
-            auth_token=context["auth_token"],
-            patient_id=context["patient_id"],
-            hospital_id=context["hospital_id"],
-            chat_mode=context["chat_mode"],
-            claimed_name=context["claimed_name"],
-            claimed_phone=context["claimed_phone"],
-            claimed_birth_year=context["claimed_birth_year"],
-            confirmed_patient_name=context["confirmed_patient_name"],
-            image_bytes=context["image_bytes"],
-            image_content_type=context["image_content_type"],
-            image_filename=context["image_filename"],
-            conversation_context=context["conversation_context"],
-            allergy_drugs=context["allergy_drugs"],
-            allergy_history_unknown=context["allergy_history_unknown"],
-            risk_signals=context["risk_signals"],
-        )
+        try:
+            context["candidate_result"] = executor_run(
+                context["question"],
+                auth_token=context["auth_token"],
+                patient_id=context["patient_id"],
+                hospital_id=context["hospital_id"],
+                chat_mode=context["chat_mode"],
+                claimed_name=context["claimed_name"],
+                claimed_phone=context["claimed_phone"],
+                claimed_birth_year=context["claimed_birth_year"],
+                confirmed_patient_name=context["confirmed_patient_name"],
+                image_bytes=context["image_bytes"],
+                image_content_type=context["image_content_type"],
+                image_filename=context["image_filename"],
+                conversation_context=context["conversation_context"],
+                allergy_drugs=context["allergy_drugs"],
+                allergy_history_unknown=context["allergy_history_unknown"],
+                risk_signals=context["risk_signals"],
+            )
+        except RuntimeError as exc:
+            logger.warning("LLM executor unavailable; using deterministic medical fallback: %s", exc)
+            context["llm_unavailable"] = True
+            if official_hits:
+                source_guidance = "\n".join(f"- {item['content']}" for item in official_hits)
+                answer = (
+                    f"根据已核验的权威健康资料，可先参考以下通用建议：\n{source_guidance}\n\n"
+                    "以上属于一般健康教育，不能替代医生结合个人病史作出的诊断或治疗方案。"
+                )
+                chosen_tool = "official_health_knowledge_fallback"
+                intent = "general_health_education"
+            else:
+                answer = (
+                    "当前模型服务暂时无法连接，我不能在缺少可核验依据时继续生成医疗建议。"
+                    "你可以稍后重试；若症状持续、加重，或出现胸痛、呼吸困难、意识异常等情况，请及时线下就医。"
+                )
+                chosen_tool = "model_unavailable_fallback"
+                intent = "service_unavailable"
+            context["candidate_result"] = {
+                "question": context["question"],
+                "answer": answer,
+                "speech_text": answer,
+                "intent": intent,
+                "intent_confidence": 1.0 if official_hits else 0.0,
+                "chosen_tool": chosen_tool,
+                "chosen_tools": [chosen_tool],
+                "tool_arguments": {},
+                "tool_result": {
+                    "success": bool(official_hits),
+                    "data": {"source_count": len(official_hits)},
+                    "message": "大模型不可用，已执行确定性安全降级",
+                },
+                "planning": {
+                    "selected_action": chosen_tool,
+                    "reason": "大模型调用失败；仅使用已核验知识，或在无依据时停止生成",
+                },
+            }
+            state.note(f"fallback:{chosen_tool}")
         state.note(f"route:{context['candidate_result'].get('chosen_tool', 'unknown')}")
         context.setdefault("evidence_pack", EvidencePack())
         return "evidence_check"
@@ -345,16 +395,24 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
 
         # ── V2 双轨：LLM 证据法官为主、确定性兜底（缺失重试路径不调用）──
         candidate = state.context.get("candidate_result") or {}
-        try:
-            judge_result = judge_evidence(
-                state.context.get("question", ""),
-                candidate.get("answer", ""),
-                pack,
-                route,
-                llm=state.context.get("judge_llm"),
-            )
-        except Exception:
-            judge_result = None
+        # A judge cannot validate an empty EvidencePack.  Calling it here adds
+        # an avoidable remote-model round without increasing safety.
+        judge_result = None
+        if (
+            (pack.items or pack.knowledge_hits)
+            and not state.context.get("llm_unavailable")
+            and not state.context.get("deterministic_direct")
+        ):
+            try:
+                judge_result = judge_evidence(
+                    state.context.get("question", ""),
+                    candidate.get("answer", ""),
+                    pack,
+                    route,
+                    llm=state.context.get("judge_llm"),
+                )
+            except Exception:
+                judge_result = None
         check = _merge_judge_verdict(check, judge_result, route)
         state.context["evidence_check"] = check.model_dump(mode="json")
         if check.judge is not None:
@@ -422,8 +480,30 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
             result["task_route"] = route.model_dump(mode="json")
         pack = state.context.get("evidence_pack")
         if pack is not None:
-            result["evidence_coverage"] = pack.coverage
+            evidence_check = state.context.get("evidence_check") or {}
+            result["evidence_coverage"] = evidence_check.get("coverage", pack.coverage)
+            knowledge_sources = [
+                {
+                    key: hit.get(key)
+                    for key in ("source_id", "source_name", "source_url", "version", "title")
+                    if hit.get(key)
+                }
+                for hit in pack.knowledge_hits
+                if isinstance(hit, dict)
+            ]
+            if knowledge_sources:
+                result["knowledge_sources"] = knowledge_sources
+                source_labels = [
+                    f"{source.get('source_name', '权威机构')}《{source.get('title', '健康科普')}》"
+                    for source in knowledge_sources
+                ]
+                result.setdefault("evidence_summary", f"回答依据：{'；'.join(source_labels)}。")
         assemble_output_contract(result)
+        if result.get("structured_fact_missing"):
+            # Preserve the deterministic absence response rather than letting
+            # generic contract defaults turn it into an open-ended follow-up.
+            result["next_action"] = NextAction.CONTACT_DOCTOR.value
+            result["risk_level"] = RiskLevel.ROUTINE.value
         # V2 阶段 4：普通风险症状在正常回答中内嵌升级指引（不强信号不拦截）
         if result.get("risk_level") == RiskLevel.ROUTINE.value:
             guided, escalated = embed_escalation_guidance(
@@ -460,6 +540,7 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
     graph.add_node(AgentNode("safety", "safety", "正在执行医疗安全检查...", safety_node))
     graph.add_node(AgentNode("task_route", "classify", "正在识别任务类型与检索来源...", task_route_node))
     graph.add_node(AgentNode("clarify", "clarify", "正在追问症状细节...", clarify_node))
+    graph.add_node(AgentNode("symptom_assessment", "agent", "正在评估症状并整理下一步...", symptom_assessment_node))
     graph.add_node(AgentNode("retrieval", "context", "正在检查结构化病历事实...", retrieval_node))
     graph.add_node(AgentNode("generate", "agent", "正在执行受控 Agent 流程...", generate_node))
     graph.add_node(AgentNode("evidence_check", "evidence", "正在检查证据充分性...", evidence_check_node))

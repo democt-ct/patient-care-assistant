@@ -30,7 +30,7 @@
 
 | 产品线 | 主要流程 | 当前定位 |
 | --- | --- | --- |
-| 照护协同 | 医生发布计划 → 患者执行 → 协调员处理求助 | 保留为可选扩展演示，体现人机协同闭环 |
+| 历史照护接口 | 旧版计划与协调接口 | 仅保留后端兼容，不属于当前产品主线或简历叙述 |
 | 医疗信息 Agent | 患者提问 → 查病历/知识 → 风险判断 → 返回依据与下一步 | 秋招简历主线 |
 
 如果两条产品线同时作为主线扩张，容易出现功能很多但技术叙事分散的问题。因此本轮重构把“患者医疗信息核验与就医导航 Agent”作为主要交付物，照护闭环用于补充说明：模型负责理解、检索和生成草案，临床动作仍由人确认和执行。
@@ -145,7 +145,7 @@ Agentic RAG 在 RAG 前后增加任务决策、证据判断和停止策略。它
 
 | 概念 | 回答的问题 | 示例 |
 | --- | --- | --- |
-| `chosen_tool` | 具体执行哪个 MCP 工具？ | `get_patient_profile` |
+| `chosen_tool` | 具体执行哪个已注册医疗工具？ | `get_patient_profile` |
 | `RetrievalRoute` | 哪类任务、允许查什么、需要什么字段、禁止做什么？ | 用药过敏任务，需要 allergy_history，禁止 dose_change |
 
 路由与工具选择解耦后，可以独立测试证据规划，也可以替换底层工具而不改变安全策略。
@@ -217,7 +217,7 @@ coverage = 已覆盖 required_facts 数量 / required_facts 总数
 | 安全层 | 紧急、自伤危机、危险用药门禁 | `medical_safety_gate.py`、`triage.py` |
 | 路由层 | TaskType、数据源、必需字段和禁止动作 | `retrieval_router.py` |
 | 证据层 | EvidencePack、覆盖率、冲突和引用校验 | `agentic_retrieval.py`、`evidence_policy.py`、`citation_validator.py` |
-| 执行层 | 结构化工具、知识检索、模型生成 | MCP 工具与 Agent executor |
+| 执行层 | 结构化工具、知识检索、模型生成 | 医疗工具注册层与 Agent executor |
 | 数据层 | 患者、病历、就诊、知识、记忆 | PostgreSQL、ChromaDB、Redis |
 | 评估与观测层 | 指标、运行记录、日志、追踪 | evaluation、Prometheus、OTel |
 
@@ -494,7 +494,7 @@ emergency → high_risk → conflict → missing → sufficient
 | --- | --- |
 | 用例总数 | 47 条 |
 | 开发集 | 18 条 |
-| 独立测试集 | 29 条 |
+| 独立测试集 | 30 条 |
 | 数据源 | `app/config/evaluation_cases.py` |
 | 运行命令 | `python scripts/run_evaluation.py --split test --verbose` |
 | 长期记录 | 保存回答指纹、评分、版本和 trace_id，不保存原始回答 |
@@ -627,23 +627,16 @@ emergency → high_risk → conflict → missing → sufficient
   绑定证据缺失或 verdict=unsupported 直接标记，高危任务覆盖为安全拒答。
 - 开关：`EVIDENCE_JUDGE_ENABLED`（默认 true，测试环境关闭）、`EVIDENCE_JUDGE_TIMEOUT_SECONDS`。
 
-### 20.3 澄清闭环（阶段 9 升级为症状对话树）
+### 20.3 症状澄清与行动建议（2026-08-08）
 
-- 模糊主诉（胸闷 / 头晕 / 头疼 / 头胀 / 乏力 / 恶心等非强信号）进入追问问卷：
-  性质 → 部位（含额头/后脑勺/太阳穴等常见选项提示）→ 持续时间 → 伴随症状 → 危险因素；
-  问卷完成后追加「是否缓解」追问；未缓解或无法判断时保守升级为就医指引
-  （risk_level=urgent，next_action=contact_doctor）。
-- 按步风险评估：每轮回答先扫描恶化信号（越来越重、冒冷汗、晕厥、呼吸困难等），
-  命中立即升级，不再等待问卷结束。
-- 中途缓解确认：性质与部位回答后插入一次「是否缓解」确认；未缓解继续追问，
-  最终缓解确认未缓解才升级；任意一步出现「不疼了 / 缓解了」即清除问卷并收尾
-  （含「没有缓解」否定守卫，避免误判为症状消失）。
-- 症状更新语义：关键字段（性质 / 部位 / 持续时间）以最近一次为准覆盖并记录变更
-  （`updates`），补充字段追加；缓解 / 消失触发整份问卷状态清除。
-- 每题回答后附带通用安全建议（非个体化、不含药物方案），并继续追问下一步。
-- 状态机 `ClarificationState` + `ClarificationStore`（Redis 优先、内存兜底，TTL 1 小时）；
-  匿名会话（无 session_id）只询问第一问，不持久化状态。
-- 安全红线不变：强信号仍由安全门禁在澄清之前短路，澄清不改变门禁判定。
+- 模糊主诉（胸闷 / 头晕 / 头疼 / 头胀 / 乏力 / 恶心等非强信号）不再进入固定五问问卷。
+  首轮只收集会改变分流结果的最小信息：起病时间、突发/逐渐、严重程度，以及神经系统、呕吐、发热颈强直等警示信号。
+- 患者补充后，Graph 从 `clarify` 转入 `symptom_assessment`：输出「当前可做什么 / 何时预约门诊 / 何时急诊」三层非诊断性建议，
+  并明确不替代医生诊断、处方或剂量调整；`next_action=monitor_symptoms` 表示观察与复评，而不是继续无条件追问。
+- 按步风险评估仍在每轮最前：恶化、意识异常、呼吸困难等信号命中后立即升级，不会等待澄清完成。
+- 状态机 `ClarificationState` + `ClarificationStore`（Redis 优先、内存兜底，TTL 1 小时）只保留到本次最小信息收集完成；
+  前端在首轮生成并持久化 `session_id`，确保 SSE 多轮对话能续接同一状态。
+- 安全红线不变：强信号仍由安全门禁在澄清之前短路；Agent 只能在允许的动作集合中选择「追问 / 给出一般性建议 / 建议门诊 / 紧急升级」。
 
 ### 20.4 规则手册知识化
 
@@ -681,6 +674,16 @@ emergency → high_risk → conflict → missing → sufficient
   - `judge_accuracy`：LLM 证据法官判定抽样准确性（仅判定存在时统计）；
   - `clarification_completion_rate`：期望澄清的模糊主诉样本正确进入追问的比例；
   - `unnecessary_clarification_rate`：非模糊主诉样本被误判为需要追问的比例（越低越好）。
+- 症状场景额外以多轮回归测试衡量：同一 `session_id` 下，首轮必须发起最小澄清，
+  第二轮必须输出行动建议；仅验证“是否发起追问”不代表对话质量。
 - 评估用例 47 → 51：clarify-001/002（dev）、judge-001（dev）、judge-002（test）。
 - 评估运行记录仍只存回答指纹与评分，不保存原始回答与 claim 原文。
+
+### 20.9 实时执行事件与可观测性
+
+- Graph 节点启动时通过 SSE `phase` 事件即时推送，事件由线程安全队列从同步 Agent 运行桥接到异步 HTTP 流；
+  前端按「身份 / 上下文 / 分类 / 工具或生成 / 证据」展示紧凑执行时间线。
+- 该时间线只展示节点名称、用户可读状态和耗时；不输出模型内部推理、病历原文、工具参数或高敏感会话内容。
+- 单次 Agent 运行的结构应可追踪为：`session_id → 安全门禁 → 任务路由 → 受控工具/检索 → 证据与引用校验 → 输出/人工升级`。
+  这与生产 Agent 常见的 tracing、状态持久化和 human-in-the-loop 模式一致，但医疗动作仍由确定性安全策略与医生审核边界约束。
 ---

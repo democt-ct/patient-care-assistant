@@ -1,5 +1,6 @@
-import { createContext, useContext, useReducer, type Dispatch, type ReactNode } from 'react';
+import { useReducer, type ReactNode } from 'react';
 import type { AppState, AppAction, ChatMode, SpeechMode, Theme } from '../types';
+import { AppContext } from './appStateContext';
 
 // ============================================================
 // 初始状态
@@ -11,7 +12,6 @@ const initialState: AppState = {
   authToken: '',
   profileName: '',
   profilePhone: '',
-  demoRole: null,
 
   sessionId: '',
   generalSessionId: '',
@@ -54,15 +54,6 @@ function appReducer(state: AppState, action: AppAction): AppState {
         authToken: action.payload.authToken ?? state.authToken,
         profileName: action.payload.profileName ?? state.profileName,
         profilePhone: action.payload.profilePhone ?? state.profilePhone,
-      };
-    case 'SET_DEMO_CONTEXT':
-      return {
-        ...state,
-        demoRole: action.payload.role,
-        hospitalId: action.payload.hospitalId,
-        patientId: action.payload.patientId ?? '',
-        profileName: action.payload.profileName ?? '',
-        currentView: action.payload.role === 'patient' ? 'dashboard' : action.payload.role === 'clinician' ? 'clinician' : 'coordinator',
       };
     case 'CLEAR_PATIENT_CONTEXT':
       return {
@@ -148,13 +139,6 @@ function appReducer(state: AppState, action: AppAction): AppState {
 // Context
 // ============================================================
 
-interface AppContextType {
-  state: AppState;
-  dispatch: Dispatch<AppAction>;
-}
-
-const AppContext = createContext<AppContextType | null>(null);
-
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(appReducer, initialState);
   return (
@@ -162,10 +146,4 @@ export function AppProvider({ children }: { children: ReactNode }) {
       {children}
     </AppContext.Provider>
   );
-}
-
-export function useAppState(): AppContextType {
-  const ctx = useContext(AppContext);
-  if (!ctx) throw new Error('useAppState must be used within AppProvider');
-  return ctx;
 }

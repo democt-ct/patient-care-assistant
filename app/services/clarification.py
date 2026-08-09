@@ -1,15 +1,14 @@
-"""模糊主诉澄清闭环：追问问卷 + 会话状态机（V2 阶段 2 / 阶段 9 增强）。
+"""模糊主诉的最小信息澄清与安全行动建议。
 
 设计依据：``docs/patient_medical_information_agent_design.md`` V2 章节。
 
-- 非强信号模糊主诉（胸闷、头晕、头疼、乏力等）进入结构化追问问卷；
-- 问卷字段：性质 / 部位 / 持续时间 / 伴随症状 / 危险因素，部位问题给出常见选项提示；
-- 每题回答后给出通用安全建议（不给药物/个体化方案），并按步评估：
+- 非强信号模糊主诉（胸闷、头晕、头疼、乏力等）先收集一组会改变分流结果的最小信息；
+- 患者补充后立即输出一般性行动建议、就医阈值和紧急红旗，而不是机械问完固定问卷；
+- 安全边界不变：不给出诊断、处方、剂量或替代医生的个体化治疗方案；
+- 每轮仍按风险评估：
   - 恶化信号（越来越重、冒冷汗、晕厥等）→ 立即升级就医指引；
   - 症状消失（不疼了、缓解了等）→ 清除问卷并收尾；
-  - 问卷进行到中途插入一次「是否缓解」确认，未缓解继续追问，最终缓解确认未缓解才升级；
-- 症状更新语义：关键字段（性质/部位/持续时间）以最近一次为准覆盖并记录变更，
-  补充字段追加，缓解/消失触发整份问卷状态清除；
+  - 症状消失（不疼了、缓解了等）→ 收尾并提示复发时重新评估；
 - 澄清状态记录到会话（Redis 优先，内存兜底），且不改变安全红线判定
   （安全门禁始终在澄清之前执行，强信号不会进入本模块）。
 """
@@ -51,26 +50,18 @@ _NEGATED_CLEARED_PATTERNS = (
     r"没有缓解|没缓解|未缓解|没有好转|没好转|没有减轻|没减轻|还是疼|还是痛|还是难受",
 )
 
-# 追问问卷：字段名 → 问题话术（部位问题给出常见选项提示，兼容"头哪里疼"类询问）
+# 一次追问仅收集会改变分流结果的最小信息。后续不把患者困在固定问卷中。
 QUESTION_FLOW = [
-    ("nature", "这个症状具体是怎样的？比如是持续性的还是阵发性的，活动或按压时会不会加重？"),
-    ("location", "症状主要出现在哪个部位？如果是头部不适，可以具体说说是额头、后脑勺、太阳穴，还是偏一侧？"),
-    ("duration", "这种情况持续多久了？是第一次出现还是反复出现？"),
-    ("associated", "有没有伴随其他症状（比如出汗、恶心、发热）？"),
-    ("risk_factors", "最近有没有熬夜、劳累、感冒、饮食变化等可能诱因？"),
+    (
+        "triage_facts",
+        "为了先判断是否需要尽快就医，请用一句话补充：症状从什么时候开始、是突然很剧烈还是逐渐出现，"
+        "以及有没有肢体无力、说话不清、意识异常、反复呕吐、发热或颈部发硬。",
+    ),
 ]
 
-# 每题回答后的通用安全建议（非个体化，不含药物方案）
-QUESTION_ADVICE = {
-    "nature": "先休息、避免剧烈活动，暂时不要自行用药。",
-    "location": "可以轻轻按摩或热敷不适部位，但要注意疼痛是否转移或加剧。",
-    "duration": "如果症状持续较久或反复发作，建议尽快就医评估。",
-    "associated": "出现出汗、恶心、发热等伴随症状时请密切观察，必要时及时就医。",
-    "risk_factors": "减少熬夜和劳累，避免长时间待在空调房，注意补水。",
-}
-
-RELIEF_QUESTION = "目前症状是否有所缓解？（回复“缓解了”或“没有缓解”）"
-MID_RELIEF_QUESTION = "目前症状有没有缓解？如果没有缓解也没关系，我们继续了解几个细节。"
+QUESTION_ADVICE: dict[str, str] = {}
+RELIEF_QUESTION = "如果症状反复、持续不缓解或加重，请再次告诉我或尽快线下就医。"
+MID_RELIEF_QUESTION = RELIEF_QUESTION
 
 NON_RELIEF_PATTERNS = (r"没有|没缓解|未缓解|更严重|加重|还是难受|还是不舒服|没有好转",)
 RELIEF_PATTERNS = (r"缓解|好转|没事了|好多了|减轻|好了|不疼",)
@@ -81,7 +72,7 @@ UPGRADE_GUIDANCE = (
 )
 
 # 关键字段：以最近一次为准覆盖；其余字段按追加语义处理
-KEY_OVERWRITE_FIELDS = ("nature", "location", "duration")
+KEY_OVERWRITE_FIELDS = ("triage_facts",)
 
 MID_RELIEF = "MID_RELIEF"
 
@@ -158,12 +149,26 @@ def apply_answer(state: ClarificationState, answer: str) -> Optional[str]:
     state.answers[key] = value
     state.step_index += 1
 
-    if state.completed_questionnaire():
-        return None
-    if state.step_index == 2 and not state.mid_relief_asked:
-        state.mid_relief_asked = True
-        return MID_RELIEF
-    return QUESTION_FLOW[state.step_index][1]
+    return None if state.completed_questionnaire() else QUESTION_FLOW[state.step_index][1]
+
+
+def build_safe_symptom_guidance(state: ClarificationState) -> str:
+    """Build a non-diagnostic, actionable response after minimal triage facts.
+
+    The response deliberately distinguishes general self-care from individual
+    medical decisions. Red flags themselves are handled earlier by the safety
+    gate / worsening detector and never depend on this text.
+    """
+    facts = state.answers.get("triage_facts", "").strip()
+    facts_line = f"我已记录你补充的情况：{facts}。\n\n" if facts else ""
+    return (
+        f"{facts_line}目前这些信息不足以判断具体病因，我不能据此替代医生作诊断或开药。"
+        "但如果当前没有突发剧烈加重或上述警示信号，症状较轻时可以先休息、补充水分、"
+        "减少熬夜和长时间用眼，暂时避免自行叠加或调整药物。\n\n"
+        "建议你观察症状是否持续、反复或影响日常生活；出现这种情况时，预约线下门诊评估。\n\n"
+        "如果出现突然剧烈加重、肢体无力或麻木、说话不清、意识异常、反复呕吐，"
+        "或伴高热和颈部发硬，请立即前往急诊或拨打 120。"
+    )
 
 
 def classify_relief(answer: str) -> Optional[bool]:

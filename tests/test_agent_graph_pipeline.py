@@ -46,8 +46,15 @@ def test_pipeline_records_evidence_stage_for_agent_result(monkeypatch):
     assert result["evidence_summary"]
 
 
-def test_pipeline_structured_fact_path_goes_through_evidence_and_assembly():
+def test_pipeline_structured_fact_path_goes_through_evidence_and_assembly(monkeypatch):
     import app.mcp.llm_router.pipeline as pipeline
+
+    judge_calls = []
+    monkeypatch.setattr(
+        pipeline,
+        "judge_evidence",
+        lambda *args, **kwargs: judge_calls.append((args, kwargs)),
+    )
 
     namespace = {
         "run_agent_tool_query": lambda *args, **kwargs: (_ for _ in ()).throw(
@@ -90,6 +97,76 @@ def test_pipeline_structured_fact_path_goes_through_evidence_and_assembly():
     assert result["risk_level"] == "routine"
     assert result["next_action"] == "continue_supplement"
     assert result["evidence_summary"]
+    assert judge_calls == []
+
+
+def test_pipeline_exposes_official_health_sources_to_clients(monkeypatch):
+    import app.mcp.llm_router.pipeline as pipeline
+
+    judge_calls = []
+    monkeypatch.setattr(
+        pipeline,
+        "judge_evidence",
+        lambda *args, **kwargs: judge_calls.append((args, kwargs)),
+    )
+
+    namespace = {
+        "run_agent_tool_query": lambda question, **kwargs: {
+            "question": question,
+            "answer": "高血压患者应结合医生建议管理饮食与运动。",
+            "chosen_tool": "direct_model_answer",
+            "tool_result": {"success": True, "data": {"source": "direct_model_answer"}},
+            "planning": {},
+        },
+        "run_agent_execution": lambda question, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("model unavailable")
+        ),
+        "evaluate_medical_safety": lambda question: type(
+            "Decision",
+            (),
+            {"blocked": False, "action": type("Action", (), {"value": "allow"})()},
+        )(),
+        "_build_safety_gate_result": lambda question, decision: {},
+        "_try_structured_fact_query": lambda **kwargs: None,
+    }
+
+    pipeline.install_graph_pipeline(namespace)
+    result = namespace["run_agent_tool_query"]("高血压患者饮食和运动需要注意什么？")
+
+    assert result["knowledge_sources"][0]["source_id"] == "nhc_hypertension_2024"
+    assert result["knowledge_sources"][0]["source_url"].startswith("https://www.nhc.gov.cn/")
+    assert "国家卫生健康委" in result["evidence_summary"]
+    assert result["evidence_coverage"] == result["evidence_check"]["coverage"]
+    assert result["chosen_tool"] == "official_health_knowledge_fallback"
+    assert judge_calls == []
+
+
+def test_pipeline_missing_structured_field_skips_llm_retries():
+    import app.mcp.llm_router.pipeline as pipeline
+
+    namespace = {
+        "run_agent_tool_query": lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("legacy pipeline should not run")),
+        "run_agent_execution": lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("LLM executor should not run")),
+        "evaluate_medical_safety": lambda question: type("Decision", (), {"blocked": False, "action": type("Action", (), {"value": "allow"})()})(),
+        "_build_safety_gate_result": lambda question, decision: {},
+        "_try_structured_fact_query": lambda **kwargs: {
+            "answer": "未检索到对应指标，请向医生确认。",
+            "chosen_tool": "get_medical_records",
+            "tool_result": {"success": True, "data": {"medical_records": []}},
+            "structured_fact_missing": True,
+            "next_action": "contact_doctor",
+            "planning": {},
+        },
+    }
+
+    pipeline.install_graph_pipeline(namespace)
+    result = namespace["run_agent_tool_query"]("我的低密度脂蛋白是多少？", patient_id="patient")
+
+    assert result["next_action"] == "contact_doctor"
+    assert result["evidence_check"]["status"] == "missing"
+    assert [item["node"] for item in result["agent_trajectory"]] == [
+        "safety", "task_route", "retrieval", "output_assemble"
+    ]
 
 
 def test_pipeline_emergency_halts_at_safety_before_any_retrieval():

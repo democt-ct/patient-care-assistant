@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAppState } from '../context/AppContext';
+import { useAppState } from '../context/appStateContext';
 import { patientApi, agentApi } from '../services/api';
 
 export function PatientPanel() {

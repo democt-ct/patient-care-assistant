@@ -64,6 +64,49 @@ class TestStreamEndpoint:
         assert "status" in event_types
         assert "token" in event_types or "done" in event_types
 
+    def test_stream_endpoint_emits_graph_phase_events(self, client, monkeypatch):
+        def phased_agent(**kwargs):
+            kwargs["on_phase"]("safety", "正在执行医疗安全检查...")
+            kwargs["on_phase"]("task_route", "正在识别任务类型与检索来源...")
+            return {
+                "question": kwargs["question"],
+                "answer": "测试回答",
+                "intent": "general_chat",
+                "chosen_tool": "test_stub",
+            }
+
+        monkeypatch.setattr("app.api.stream_routes.run_agent_tool_query_stream", phased_agent)
+        resp = client.post("/api/v1/mcp/agent/query-stream", json={"question": "你好", "chat_mode": "general"})
+        assert "event: phase" in resp.text
+        assert '"phase": "safety"' in resp.text
+        assert resp.text.index("event: phase") < resp.text.index("event: token")
+
+    def test_stream_done_event_keeps_official_knowledge_sources(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "app.api.stream_routes.run_agent_tool_query_stream",
+            lambda **kwargs: {
+                "answer": "权威资料摘要",
+                "intent": "general_health_education",
+                "chosen_tool": "official_health_knowledge_fallback",
+                "evidence_coverage": 1.0,
+                "knowledge_sources": [{
+                    "source_id": "nhc_hypertension_2024",
+                    "source_name": "国家卫生健康委",
+                    "source_url": "https://www.nhc.gov.cn/example",
+                    "version": "2024-07-01",
+                    "title": "高血压健康指导",
+                }],
+            },
+        )
+
+        resp = client.post("/api/v1/mcp/agent/query-stream", json={
+            "question": "高血压患者饮食要注意什么？",
+            "chat_mode": "general",
+        })
+
+        assert '"knowledge_sources": [{"source_id": "nhc_hypertension_2024"' in resp.text
+        assert '"evidence_coverage": 1.0' in resp.text
+
     def test_stream_failure_returns_safe_fallback(self, client, monkeypatch):
         def fail_agent(**kwargs):
             raise RuntimeError("model unavailable")

@@ -1,13 +1,10 @@
 import { useState, useEffect } from 'react';
-import { AppProvider, useAppState } from './context/AppContext';
+import { AppProvider } from './context/AppContext';
+import { useAppState } from './context/appStateContext';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { ChatPanel } from './components/ChatPanel';
-import { CarePlanPanel } from './components/CarePlanPanel';
-import { CareCoordinatorPanel } from './components/CareCoordinatorPanel';
 import { DashboardPanel } from './components/DashboardPanel';
-import { CarePlanReviewPanel } from './components/CarePlanReviewPanel';
-import { RoleLanding } from './components/RoleLanding';
 import { LoginModal } from './components/LoginModal';
 
 import { MemoryDebugPanel } from './components/MemoryDebugPanel';
@@ -24,10 +21,10 @@ function AppShell() {
 
   return (
     <div className="app-shell">
-      {state.currentView !== 'role' && <Header
+      <Header
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         sidebarOpen={sidebarOpen}
-      />}
+      />
 
       <div className="app-body">
         {sidebarOpen && (
@@ -38,7 +35,7 @@ function AppShell() {
         </aside>
 
         <main className="app-main">
-          {state.currentView === 'role' ? <RoleLanding /> : state.currentView === 'care' ? <CarePlanPanel /> : state.currentView === 'clinician' ? <CarePlanReviewPanel /> : state.currentView === 'coordinator' ? <CareCoordinatorPanel /> : state.currentView === 'dashboard' ? <DashboardPanel /> : <ChatPanel />}
+          {state.currentView === 'dashboard' ? <DashboardPanel /> : <ChatPanel key={state.chatMode} />}
         </main>
       </div>
 

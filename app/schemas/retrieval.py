@@ -189,6 +189,7 @@ class NextAction(str, Enum):
     """输出契约中的建议下一步。"""
 
     CONTINUE_SUPPLEMENT = "continue_supplement"
+    MONITOR_SYMPTOMS = "monitor_symptoms"
     VIEW_RECORDS = "view_records"
     CONTACT_DOCTOR = "contact_doctor"
     EMERGENCY_CARE = "emergency_care"

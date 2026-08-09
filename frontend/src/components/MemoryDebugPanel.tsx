@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAppState } from '../context/AppContext';
+import { useAppState } from '../context/appStateContext';
 
 export function MemoryDebugPanel() {
   const { state } = useAppState();

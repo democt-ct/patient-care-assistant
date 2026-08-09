@@ -1,4 +1,4 @@
-# 患者照护助手 — 前端
+# 患者医疗信息安全 Agent — 前端
 
 > React 19 + TypeScript + Vite 前端，通过代理连接后端 FastAPI 服务。
 
@@ -19,6 +19,13 @@ npm run build
 
 开发模式访问 `http://localhost:3000`，API 请求自动代理到 `http://127.0.0.1:8001`（详见 `vite.config.ts`）。
 
+后端使用其他端口时，可在 PowerShell 中显式指定代理目标：
+
+```powershell
+$env:VITE_BACKEND_TARGET='http://127.0.0.1:8015'
+npm.cmd run dev -- --port 3015
+```
+
 ---
 
 ## 项目结构
@@ -29,11 +36,12 @@ frontend/
 │   ├── main.tsx                # 入口
 │   ├── App.tsx                 # 根组件（路由 + 布局）
 │   ├── context/
-│   │   └── AppContext.tsx       # 全局状态（会话、患者、偏好）
+│   │   ├── AppContext.tsx       # 全局状态 Provider
+│   │   └── appStateContext.ts   # Context 定义与访问 Hook
 │   ├── components/
 │   │   ├── Header.tsx          # 顶栏（当前患者上下文 + 全局操作）
 │   │   ├── Sidebar.tsx         # 侧栏（健康工作台导航、患者选择、问诊历史）
-│   │   ├── DashboardPanel.tsx  # 健康概览（今日重点、待办与快捷入口）
+│   │   ├── DashboardPanel.tsx  # 医疗信息入口（档案统计与快捷提问）
 │   │   ├── ChatPanel.tsx       # 智能问诊（消息流、结果、SSE 流式）
 │   │   ├── PatientPanel.tsx    # 患者信息面板（CRUD + 病历/就诊查询）
 │   │   ├── LoginModal.tsx      # 身份登录弹窗
@@ -59,17 +67,17 @@ frontend/
 
 | 路径 | 内容 |
 |------|------|
-| `/` | 健康工作台（健康概览、照护计划与智能问诊） |
+| `/` | 患者医疗信息工作台（档案概览与 Agent 问答） |
 | `/evaluate` | 质量评估控制台（由后端 `evaluate.html` 提供） |
 
 ---
 
 ## 主要依赖
 
-- `react` 18 + `react-dom` 18
-- `typescript` 5.x
-- `vite` 5.x + `@vitejs/plugin-react`
-- `eslint` 9.x（React + TypeScript 规则）
+- `react` 19 + `react-dom` 19
+- `typescript` 6.x
+- `vite` 8.x + `@vitejs/plugin-react`
+- `eslint` 10.x（React + TypeScript 规则）
 
 ---
 

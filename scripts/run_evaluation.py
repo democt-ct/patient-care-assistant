@@ -16,8 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.database import SessionLocal
 from app.mcp.llm_router import run_agent_tool_query
-from app.services.evaluation_service import compute_metrics
-from tests.test_evaluation import EVALUATION_CASES
+from app.services.evaluation_service import compute_metrics, score_case
+from app.config.evaluation_cases import EVALUATION_CASES
 
 # ANSI colors
 GREEN = "\033[92m"
@@ -31,8 +31,6 @@ RESET = "\033[0m"
 def evaluate_case(case: dict, verbose: bool = False) -> dict:
     """Run a single evaluation case and check results."""
     question = case["question"]
-    expected_keywords = case.get("expected_keywords", [])
-    forbidden_keywords = case.get("forbidden_keywords", [])
     expected_intents = case.get("expected_intents", [])
 
     # Resolve patient
@@ -83,37 +81,22 @@ def evaluate_case(case: dict, verbose: bool = False) -> dict:
             "contract": None,
         }
 
-    # Check expected keywords
-    missing_keywords = []
-    for kw in expected_keywords:
-        if kw not in answer:
-            missing_keywords.append(kw)
-
-    # Check forbidden keywords
-    found_forbidden = []
-    for kw in forbidden_keywords:
-        if kw in answer:
-            found_forbidden.append(kw)
-
-    # Check intent
-    intent_ok = intent in expected_intents if expected_intents else True
-
-    passed = (
-        len(missing_keywords) == 0
-        and len(found_forbidden) == 0
-        and intent_ok
-    )
+    # The CLI must use the same versioned scoring contract as the API and
+    # persisted evaluation runs.  Do not maintain a weaker local pass rule.
+    score = score_case(case, answer=answer, intent=intent)
 
     return {
         "id": case["id"],
-        "pass": passed,
+        "pass": score["passed"],
         "answer": answer[:200] + "..." if len(answer) > 200 else answer,
         "intent": intent,
         "intent_confidence": intent_confidence,
         "intent_expected": expected_intents,
-        "intent_ok": intent_ok,
-        "missing_keywords": missing_keywords,
-        "found_forbidden": found_forbidden,
+        "intent_ok": score["intent_ok"],
+        "missing_keywords": score["missing_keywords"],
+        "found_forbidden": score["found_forbidden"],
+        "missing_safety_requirements": score["missing_safety_requirements"],
+        "score": score,
         "duration": round(duration, 2),
         "error": None,
         "contract": contract,
@@ -123,7 +106,8 @@ def evaluate_case(case: dict, verbose: bool = False) -> dict:
 def print_result(result: dict, verbose: bool = False):
     """Print a single evaluation result."""
     case_id = result["id"]
-    status_icon = f"{GREEN}✓{RESET}" if result["pass"] else f"{RED}✗{RESET}"
+    # Keep the CLI compatible with the default Windows GBK console.
+    status_icon = f"{GREEN}[OK]{RESET}" if result["pass"] else f"{RED}[FAIL]{RESET}"
     status_text = f"{GREEN}PASS{RESET}" if result["pass"] else f"{RED}FAIL{RESET}"
 
     print(f"\n  {status_icon} {BOLD}[{case_id}]{RESET} {status_text} ({result['duration']}s)")
@@ -134,11 +118,15 @@ def print_result(result: dict, verbose: bool = False):
 
     if verbose or not result["pass"]:
         print(f"     意图: {CYAN}{result.get('intent', '')}{RESET} (期望: {', '.join(result.get('intent_expected', []))}"
-              f" {'✓' if result['intent_ok'] else f'{RED}✗{RESET}'})")
+              f" {'OK' if result['intent_ok'] else f'{RED}FAIL{RESET}'})")
         if result["missing_keywords"]:
             print(f"     {RED}缺少关键词: {', '.join(result['missing_keywords'])}{RESET}")
         if result["found_forbidden"]:
             print(f"     {RED}出现禁用词: {', '.join(result['found_forbidden'])}{RESET}")
+        if result.get("missing_safety_requirements"):
+            print(f"     {RED}缺少安全要求: {', '.join(result['missing_safety_requirements'])}{RESET}")
+        if result.get("score"):
+            print(f"     得分: {result['score']['scores']['total']:.1f} / 100")
         print(f"     回答: {YELLOW}{result['answer'][:150]}{RESET}")
 
 
