@@ -63,7 +63,7 @@ export function DashboardPanel() {
         <div className="dash-inner">
           <div className="dash-hero">
             <div className="dash-hero-icon">✦</div>
-            <span className="dash-eyebrow">患者医疗信息 Agent</span>
+            <span className="eyebrow">患者医疗信息 Agent</span>
             <h1>{greeting()}，先把医疗信息弄明白</h1>
             <p>它可以解释已授权的病历、检查和既有医嘱，帮助准备就诊问题；不代替医生诊断或开药。</p>
           </div>

@@ -1,5 +1,23 @@
 # CHANGELOG — 患者医疗信息 Agent
 
+## 2026-08-11 — 统一启动入口：npm run dev 取代 bat 脚本
+
+- 新增根目录 `package.json` 与 Node 启动器 `scripts/dev.js`：`npm run dev` 一条命令拉起 Docker 基础设施（PostgreSQL + Redis）→ 等待数据库就绪 → 并行启动后端（uvicorn `--reload`）与前端（Vite）→ 自动打开浏览器；`Ctrl+C` 统一停止全部服务。
+- 提供分步命令：`npm run dev:backend`、`npm run dev:frontend`、`npm run docker:infra`，以及 `npm test` / `npm run build` 等统一入口。
+- 启动器自动识别并修复其他 compose 项目遗留的同名容器冲突（如 `patient-agent-postgres` 已存在时），避免 `docker compose up` 直接报错。
+- README「快速体验」与「本地开发」改为命令式引导；`start_dev.bat` / `start_tunnel.bat` 保留为可选兼容入口。
+- 验证：`npm run dev` 全链路冒烟通过（PG 就绪 → 后端 `/health` → 前端 `:3000`），ESLint 通过。
+
+## 2026-08-10 — 前端界面呈现清理与整合
+
+- 删除从未被引用的 `PatientPanel.tsx` 组件及其 `isPatientPanelOpen` 状态与 `SET_PATIENT_PANEL` action。
+- 清理 `global.css` 中约 1/3 的死样式（277 类 → 157 类，文件 3690 → 2440 行）：移除已下线功能的照护计划/协调员/角色落地页（`care-*`、`coordinator-*`、`role-*`）、遗留的 `mode-pill`/`header-center`/`nav-pill`、`drawer`/`input-row`/`card-row`/`panel-header` 等通用面板工具类、`dash-todo-*` 与重复定义的 `.record-item`；修复不存在的 `--space-7` 变量引用。
+- 聊天页合并双层标题：移除与欢迎页内容重复的 `chat-page-header`，欢迎屏统一为「图标 + eyebrow + 标题 + 描述 + 快捷提问」单一入口；删除冗余的「已关联健康档案」chip。
+- 通用模式（未绑定患者）欢迎页补齐 4 个健康教育类快捷提问；个性化模式未绑定时显示「绑定患者身份」按钮直接打开登录弹窗。
+- 修复流式输出隐藏问题：存在执行步骤卡片时，逐字回答气泡不再被跳过，二者可同时展示。
+- 侧边栏「最近对话」不再把当前会话的每条用户消息列为独立历史项，合并为单条「当前对话 · N 条」摘要；导航图标由文字符号统一为与全站一致的 SVG 图标。
+- 验证：前端生产构建、Vitest（8 条）与 ESLint 通过。
+
 ## 2026-08-09 — 公开仓库发布收尾
 
 - README 调整为面向开发者和项目使用者的正式说明，移除面试、秋招和评审导向措辞，将演示章节统一为可复现的“快速体验”与主链路验证。

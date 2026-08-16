@@ -1,6 +1,11 @@
 @echo off
 setlocal enabledelayedexpansion
 
+REM ============================================================
+REM  Legacy launcher — kept for compatibility.
+REM  Use `npm run dev` at the repository root instead.
+REM ============================================================
+
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
 

@@ -17,6 +17,8 @@ npm run dev
 npm run build
 ```
 
+> 全栈一键启动（含 Docker 基础设施与后端）请在仓库根目录执行 `npm run dev`，由 `scripts/dev.js` 统一拉起。
+
 开发模式访问 `http://localhost:3000`，API 请求自动代理到 `http://127.0.0.1:8001`（详见 `vite.config.ts`）。
 
 后端使用其他端口时，可在 PowerShell 中显式指定代理目标：
@@ -43,7 +45,6 @@ frontend/
 │   │   ├── Sidebar.tsx         # 侧栏（健康工作台导航、患者选择、问诊历史）
 │   │   ├── DashboardPanel.tsx  # 医疗信息入口（档案统计与快捷提问）
 │   │   ├── ChatPanel.tsx       # 智能问诊（消息流、结果、SSE 流式）
-│   │   ├── PatientPanel.tsx    # 患者信息面板（CRUD + 病历/就诊查询）
 │   │   ├── LoginModal.tsx      # 身份登录弹窗
 │   │   └── MemoryDebugPanel.tsx # 记忆 Debug 可视化面板
 │   ├── services/

@@ -1,6 +1,11 @@
 @echo off
 setlocal
 
+REM ============================================================
+REM  Cloudflare Tunnel launcher — optional remote demo.
+REM  Local dev: use `npm run dev` at the repository root.
+REM ============================================================
+
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
 

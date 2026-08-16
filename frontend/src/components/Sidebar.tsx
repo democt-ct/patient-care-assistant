@@ -163,10 +163,19 @@ export function Sidebar({ onClose }: SidebarProps) {
       <div className="sidebar-panel-body">
         <nav className="workspace-nav" aria-label="主要功能">
           <button className={`workspace-nav-item ${state.currentView === 'dashboard' ? 'active' : ''}`} onClick={() => navigate('dashboard')}>
-            <span className="workspace-nav-icon">⌂</span>健康概览
+            <span className="workspace-nav-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+                <polyline points="9 22 9 12 15 12 15 22"/>
+              </svg>
+            </span>健康概览
           </button>
           <button className={`workspace-nav-item ${state.currentView === 'chat' ? 'active' : ''}`} onClick={() => navigate('chat', state.patientId ? 'memory' : 'general')}>
-            <span className="workspace-nav-icon">✦</span>智能问诊
+            <span className="workspace-nav-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+              </svg>
+            </span>智能问诊
           </button>
         </nav>
 
@@ -182,21 +191,23 @@ export function Sidebar({ onClose }: SidebarProps) {
         {state.currentView === 'chat' && <div className="sidebar-section">
           <div className="sidebar-section-label">最近对话</div>
           <div className="sidebar-history">
-            {/* Current session messages */}
-            {state.chatMode === 'general' && state.generalChatMessages.length > 0 && (
-              state.generalChatMessages.filter(m => m.role === 'user').slice(-8).reverse().map((m, i) => (
-                <div key={`g-${i}`} className="sidebar-history-item active">
-                  <div className="history-preview">{m.content.slice(0, 50)}{m.content.length > 50 ? '...' : ''}</div>
+            {/* Current session — single summary entry */}
+            {(() => {
+              const currentMessages = state.chatMode === 'general' ? state.generalChatMessages : state.chatMessages;
+              if (currentMessages.length === 0) return null;
+              const lastUser = [...currentMessages].reverse().find((m) => m.role === 'user');
+              return (
+                <div className="sidebar-history-item active">
+                  <div className="history-meta">
+                    <span className="history-time">当前对话</span>
+                    <span className="history-count">{currentMessages.length} 条</span>
+                  </div>
+                  {lastUser && (
+                    <div className="history-preview">{lastUser.content.slice(0, 50)}{lastUser.content.length > 50 ? '...' : ''}</div>
+                  )}
                 </div>
-              ))
-            )}
-            {state.chatMode === 'memory' && state.chatMessages.length > 0 && (
-              state.chatMessages.filter(m => m.role === 'user').slice(-8).reverse().map((m, i) => (
-                <div key={`m-${i}`} className="sidebar-history-item active">
-                  <div className="history-preview">{m.content.slice(0, 50)}{m.content.length > 50 ? '...' : ''}</div>
-                </div>
-              ))
-            )}
+              );
+            })()}
             {/* Memory sessions */}
             {state.chatMode === 'memory' && sessions.length > 0 && (
               sessions.filter(s => s.session_id !== state.sessionId).slice(0, 5).map((s) => (

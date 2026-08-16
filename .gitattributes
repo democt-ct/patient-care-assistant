@@ -1,0 +1,13 @@
+* text=auto
+
+# 二进制文件永不参与行尾转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+*.bin binary

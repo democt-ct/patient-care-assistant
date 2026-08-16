@@ -27,13 +27,21 @@ flowchart LR
 
 ## 快速体验
 
-运行启动脚本后，终端会输出可访问的 Cloudflare URL，无需在访问端安装本地依赖。首次运行前，请先将 `.env.example` 复制为 `.env` 并配置模型密钥。
+无需手动分开启动数据库、后端和前端。在仓库根目录执行一条命令即可启动 PostgreSQL/Redis、后端与 React 界面，并自动打开浏览器：
 
-```bat
-start_tunnel.bat
+```bash
+npm run dev
 ```
 
-脚本会启动 PostgreSQL 和 Redis、构建 React 界面、以 `DEMO_MODE=true` 准备虚构病例、启动 8001 后端，并将完整界面通过 Cloudflare Tunnel 暴露出去。
+首次运行前，请先将 `.env.example` 复制为 `.env` 并配置模型密钥：
+
+```bash
+copy .env.example .env
+```
+
+`npm run dev` 会按顺序完成：拉起 Docker 基础设施（PostgreSQL + Redis）→ 等待数据库就绪 → 启动 FastAPI 后端（`http://localhost:8001`，含 Swagger）→ 启动 React 前端（`http://localhost:3000`）→ 自动打开浏览器。终端输入 `Ctrl+C` 即可同时停止全部服务。若需关闭浏览器自动打开，可执行 `npm run dev -- --no-open`。
+
+需要远程演示时，可选地通过 Cloudflare Tunnel 把 8001 后端暴露为公网 URL（无需访问端安装依赖），命名隧道配置放在未提交的 `.cloudflared/config.yml` 中；未配置时使用临时 `trycloudflare.com` 链接。
 
 可按下面顺序验证医疗信息 Agent 主链路：
 
@@ -41,8 +49,6 @@ start_tunnel.bat
 2. 验证**危险拦截**：询问“缬沙坦我应该吃几片？”，观察确定性安全门禁拒绝个体化剂量建议。
 3. 验证**冲突提示**：询问“我青霉素过敏，能用头孢吗？”，观察系统同时列出两条记录并提示由医生确认。
 4. 验证**危机干预**：输入“最近总是想自杀 / 不想活”，观察确定性门禁直接给出全国心理援助热线 12356 与 120 指引，不进入自由生成。
-
-Cloudflare 未配置命名隧道时，脚本会打印临时 `trycloudflare.com` 链接；窗口保持运行期间链接有效。命名隧道配置放在未提交的 `.cloudflared/config.yml` 中。
 
 ## 产品能力
 
@@ -153,7 +159,27 @@ ChromaDB 仅保存本地可重建的检索索引，`data/chroma_knowledge/` 不�
 
 ### 开发模式
 
-```bat
+一条命令启动全栈（自动拉起 Docker 基础设施，并行启动后端与前端）：
+
+```bash
+npm run dev
+```
+
+也可以单独启动某一端，或只启动数据库：
+
+| 命令 | 作用 |
+| --- | --- |
+| `npm run dev` | 全栈：Docker 基础设施 + 后端 + 前端，自动打开浏览器 |
+| `npm run dev -- --no-open` | 同上，但不自动打开浏览器 |
+| `npm run dev:backend` | 只启动后端（uvicorn `--reload`） |
+| `npm run dev:frontend` | 只启动前端（Vite） |
+| `npm run docker:infra` | 只启动 PostgreSQL + Redis |
+| `npm test` | 后端 pytest + 前端 Vitest |
+| `npm run build` | 前端生产构建 |
+
+也可以手动分步启动，效果相同：
+
+```bash
 docker compose up -d
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
 
@@ -171,12 +197,14 @@ npm run dev
 
 运行测试：
 
-```bat
+```bash
 python -m pytest -q
 cd frontend && npm test
 ```
 
 当前 341 条 pytest 测试、8 条前端 Vitest；ESLint 与前端生产构建均纳入 GitHub Actions 发布检查。
+
+> 兼容说明：旧的 `start_dev.bat` / `start_tunnel.bat` 启动脚本仍保留，功能已由 `npm run dev` 与 Cloudflare Tunnel 配置取代，仅作为内网穿透等场景的可选兼容入口。
 
 ## 项目结构
 

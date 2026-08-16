@@ -27,10 +27,11 @@
 | `frontend/` | ★ 新版前端（React 19 + TypeScript + Vite） |
 | `data/chroma_knowledge/` | 本地生成的 ChromaDB 运行目录（不纳入版本控制；由导入/同步流程重建） |
 | `docs/` | 项目文档 |
-| `scripts/` | 工具脚本（批量导入、质量评估、种子数据） |
+| `scripts/` | 工具脚本（批量导入、质量评估、种子数据、`dev.js` Node 开发启动器） |
 | `tests/` | pytest 测试（341 个） |
 | `docker-compose.yml` | PostgreSQL 15 (:5433) + Redis 7 (:6380) |
-| `start_dev.bat` | 本地一键启动 |
+| `package.json` | 根目录统一启动/测试入口（`npm run dev` 等） |
+| `start_dev.bat` / `start_tunnel.bat` | 兼容旧启动脚本（可选，功能已被 `npm run dev` 取代） |
 
 > 完整目录树、每层详解、架构模式见 **[docs/项目结构文档.md](docs/项目结构文档.md)**
 
@@ -40,10 +41,11 @@
 
 | 方式 | 命令 | 说明 |
 |------|------|------|
-| **后端开发** | `python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload` | 开发模式热重载，需先启动 Docker |
-| **Docker 服务** | `docker compose up -d` | 启动 PostgreSQL(:5433) 与 Redis(:6380) |
-| **前端开发** | `cd frontend && npm run dev` | :3000 代理到 :8001 |
-| **内网穿透** | 双击 `start_tunnel.bat` | 一键后端 + Cloudflare 隧道 |
+| **一键全栈** | `npm run dev` | 拉起 Docker 基础设施 → 启动后端(:8001) + 前端(:3000) → 自动开浏览器；`-- --no-open` 关闭自动打开 |
+| **后端开发** | `npm run dev:backend` | 等价 `python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload` |
+| **前端开发** | `npm run dev:frontend` | 等价 `cd frontend && npm run dev`，:3000 代理到 :8001 |
+| **Docker 服务** | `npm run docker:infra` | 等价 `docker compose up -d`，启动 PostgreSQL(:5433) 与 Redis(:6380) |
+| **内网穿透** | `start_tunnel.bat`（可选） | 一键后端 + Cloudflare 隧道，依赖 cloudflared |
 | **质量评估** | `python scripts/run_evaluation.py --split test --verbose` | 运行 51 条分层评估用例（21 开发 / 30 独立测试；用例数据源在 `app/config/evaluation_cases.py`） |
 
 访问：

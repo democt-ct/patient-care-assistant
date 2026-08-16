@@ -239,7 +239,6 @@ export interface AppState {
   currentView: AppView;
   memoryDebugOpen: boolean;
   isLoading: boolean;
-  isPatientPanelOpen: boolean;
   isLoginModalOpen: boolean;
   error: string | null;
   statusMessage: string;
@@ -267,7 +266,6 @@ export type AppAction =
   | { type: 'SET_VIEW'; payload: AppView }
   | { type: 'SET_MEMORY_DEBUG'; payload: boolean }
   | { type: 'SET_LOADING'; payload: boolean }
-  | { type: 'SET_PATIENT_PANEL'; payload: boolean }
   | { type: 'SET_LOGIN_MODAL'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string | null }
   | { type: 'SET_STATUS'; payload: string }

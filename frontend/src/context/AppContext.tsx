@@ -34,7 +34,6 @@ const initialState: AppState = {
   currentView: 'dashboard',
   memoryDebugOpen: false,
   isLoading: false,
-  isPatientPanelOpen: false,
   isLoginModalOpen: false,
   error: null,
   statusMessage: '',
@@ -109,8 +108,6 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, memoryDebugOpen: action.payload };
     case 'SET_LOADING':
       return { ...state, isLoading: action.payload };
-    case 'SET_PATIENT_PANEL':
-      return { ...state, isPatientPanelOpen: action.payload };
     case 'SET_LOGIN_MODAL':
       return { ...state, isLoginModalOpen: action.payload };
     case 'SET_ERROR':

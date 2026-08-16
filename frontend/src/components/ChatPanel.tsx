@@ -38,6 +38,13 @@ const WELCOME_PROMPTS = [
   { text: '根据我的情况给一些健康建议' },
 ];
 
+const GENERAL_PROMPTS = [
+  { text: '高血压患者日常饮食要注意什么？' },
+  { text: '感冒发烧超过多少度建议就医？' },
+  { text: '服用头孢期间为什么不能饮酒？' },
+  { text: '体检报告里的“结节”是什么意思？' },
+];
+
 const PHASE_LABELS: Record<string, string> = {
   identity: '身份校验',
   classify: '任务分类',
@@ -486,14 +493,6 @@ export function ChatPanel() {
 
   return (
     <div className="chat-panel">
-      <header className="chat-page-header">
-        <div>
-          <span className="chat-page-eyebrow">智能问诊</span>
-          <h1>{isMemory ? '结合健康档案，为你解答' : '健康咨询助手'}</h1>
-          <p>{isMemory ? (state.patientId ? '回答将参考已授权的病历与就诊信息。' : '请先绑定患者身份，以使用个性化问诊。') : '适合了解通用健康知识，不能替代线下诊断。'}</p>
-        </div>
-        {isMemory && state.patientId && <span className="chat-context-chip">已关联健康档案</span>}
-      </header>
       {/* Welcome Screen (only when no messages) */}
       {messages.length === 0 && !state.isLoading && (
         <div className="chat-welcome">
@@ -502,17 +501,25 @@ export function ChatPanel() {
               <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
             </svg>
           </div>
+          <span className="eyebrow">{isMemory ? '个性化问诊' : '健康咨询'}</span>
           <h2>有什么可以帮你的？</h2>
           <p>
             {isMemory
               ? state.patientId
-                ? `你好${state.profileName ? '，' + state.profileName : ''}。我可以帮你查询病历、了解诊断结果、提供健康建议。`
-                : '请先绑定患者身份，开始智能问答。'
-              : '直接提问，无需绑定身份。'}
+                ? `你好${state.profileName ? '，' + state.profileName : ''}。我可以帮你查询病历、了解诊断结果、提供健康建议，回答会参考已授权的病历与就诊信息。`
+                : '绑定患者身份后，可以结合已授权的病历与就诊记录进行个性化问答。'
+              : '直接提问，无需绑定身份。回答为通用健康知识，不能替代线下诊断。'}
           </p>
-          {isMemory && state.patientId && (
+          {isMemory && !state.patientId ? (
+            <button
+              className="btn btn-primary"
+              onClick={() => dispatch({ type: 'SET_LOGIN_MODAL', payload: true })}
+            >
+              绑定患者身份
+            </button>
+          ) : (
             <div className="welcome-prompts">
-              {WELCOME_PROMPTS.map((prompt, i) => (
+              {(isMemory ? WELCOME_PROMPTS : GENERAL_PROMPTS).map((prompt, i) => (
                 <button
                   key={i}
                   className="welcome-prompt-card"
@@ -659,7 +666,7 @@ export function ChatPanel() {
             </div>
           )}
 
-          {state.isLoading && !agentProcess && (
+          {state.isLoading && (streamingContent || !agentProcess || agentProcess.phases.length === 0) && (
             <div className="chat-msg chat-msg-assistant">
               <div className="chat-msg-avatar">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
