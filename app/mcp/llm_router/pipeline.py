@@ -4,24 +4,31 @@ import logging
 from typing import Any, Optional
 
 from app.agent.graph import AgentGraph, AgentGraphState, AgentNode
-from app.config.rulebook_knowledge import rulebook_context_for
 from app.config.official_health_knowledge import official_health_context_for
+from app.config.rulebook_knowledge import rulebook_context_for
+from app.config.trusted_medical_sources import trusted_medical_context_for
 from app.mcp.llm_router.output_contract import assemble_output_contract
 from app.schemas.retrieval import (
+    Claim,
     EvidenceCheck,
     EvidenceConflict,
     EvidenceDecision,
     EvidenceJudgeResult,
     EvidenceJudgeVerdict,
     EvidencePack,
+    EvidenceSourceType,
     EvidenceStatus,
+    FinalDecision,
     NextAction,
     RetrievalRoute,
     RiskLevel,
+    TaskContract,
     TaskType,
 )
 from app.services.agentic_retrieval import build_evidence_pack_from_structured_result
 from app.services.citation_validator import validate_answer
+from app.services.claim_extraction import extract_claims
+from app.services.claim_validator import validate_claims
 from app.services.clarification import (
     QUESTION_FLOW,
     UPGRADE_GUIDANCE,
@@ -37,6 +44,8 @@ from app.services.evidence_judge import judge_evidence
 from app.services.evidence_policy import evaluate_evidence
 from app.services.response_guidance import embed_escalation_guidance, personalize_response
 from app.services.retrieval_router import route_question
+from app.services.safety_policy import decide_final, enforce_claim_safety, prune_answer
+from app.services.task_contract import build_task_contract, contract_summary_text
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +60,77 @@ _FACT_LABELS: dict[str, str] = {
     "timeline_records": "时间线记录",
     "report_facts": "报告指标",
 }
+
+_PATIENT_FACT_LABELS: dict[str, str] = {
+    "allergy_history": "过敏史",
+    "current_medications": "当前用药",
+    "diagnosis": "诊断",
+    "visit_records": "就诊记录",
+    "surgeries": "手术史",
+    "physician": "接诊医生",
+    "emergency_contact": "紧急联系人",
+    "timeline_records": "时间线记录",
+    "report_facts": "报告指标",
+}
+
+_SAFETY_REFUSAL_TEXT = (
+    "该请求涉及个体化用药或剂量调整，超出我的权限范围，我不能给出具体方案。"
+    "请携带药品名称、规格、当前用法和最近的检验结果，向开方医生或药师核实；"
+    "如出现严重不适，请立即就医。"
+)
+
+
+def _apply_knowledge_requirement(
+    check: EvidenceCheck,
+    pack: EvidencePack,
+    contract: Optional[TaskContract],
+) -> EvidenceCheck:
+    """按 Task Contract 的证据要求执行分层回退。
+
+    回退链：REVIEWED_KNOWLEDGE → TRUSTED_MEDICAL_SOURCE → 按任务风险决定
+    是否允许 MODEL_KNOWLEDGE。不再把「审核知识为空」一律当作拒答。
+    """
+    if contract is None:
+        return check
+    required_kinds = {
+        requirement.evidence_type
+        for requirement in contract.evidence_requirements
+        if requirement.required
+    }
+    if (
+        EvidenceSourceType.REVIEWED_KNOWLEDGE not in required_kinds
+        and EvidenceSourceType.TRUSTED_MEDICAL_SOURCE not in required_kinds
+    ):
+        return check
+    if pack.reviewed_knowledge() or pack.trusted_sources():
+        return check
+    if contract.fallback_strategy == "model_knowledge_limited":
+        # 低风险通识允许有限 Model Knowledge 兜底（Claim 层会标记来源）
+        return check
+    if not pack.patient_evidence():
+        check.status = EvidenceStatus.HIGH_RISK
+        check.decision = EvidenceDecision.REFUSE
+        return check
+    check.status = EvidenceStatus.MISSING
+    check.decision = EvidenceDecision.CLARIFY
+    if "trusted_medical_source" not in check.missing_facts:
+        check.missing_facts = [*check.missing_facts, "trusted_medical_source"]
+    return check
+
+
+def _build_patient_evidence_summary(pack: Optional[EvidencePack]) -> str:
+    """生成患者证据摘要（只列字段标签，不含病历原文）。"""
+    if pack is None:
+        return ""
+    patient_items = pack.patient_evidence()
+    if not patient_items:
+        return "未使用患者病历数据。"
+    labels = []
+    for item in patient_items:
+        label = _PATIENT_FACT_LABELS.get(item.field)
+        if label and label not in labels:
+            labels.append(label)
+    return "依据患者记录字段：" + "、".join(labels) + "。"
 
 
 def _merge_judge_verdict(
@@ -112,12 +192,19 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
     def task_route_node(state: AgentGraphState) -> Optional[str]:
         route = route_question(state.context["question"])
         state.context["route"] = route
+        state.context["contract"] = build_task_contract(route)
         state.note(f"task:{route.task.value}:{route.route_reason}")
         # V2 澄清闭环：模糊主诉或存在进行中的追问状态时进入澄清节点
         session_id = state.context.get("session_id")
         has_active_clarification = bool(session_id) and get_clarification_store().get(session_id) is not None
         if classify_vague_symptom(state.context.get("question", "")) or has_active_clarification:
             return "clarify"
+        return "task_contract"
+
+    def task_contract_node(state: AgentGraphState) -> Optional[str]:
+        contract = state.context.get("contract")
+        if contract is not None:
+            state.note(f"contract:{contract.task_type.value}")
         return "retrieval"
 
     def _set_clarify_result(
@@ -296,6 +383,7 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
         # V2 规则手册知识注入：已审核处理规范优先，患者事实块随后
         rulebook = rulebook_context_for(context.get("route"))
         official_hits = official_health_context_for(context["question"], context.get("route"))
+        trusted_hits = trusted_medical_context_for(context["question"], context.get("route"))
         if official_hits:
             official_block = "\n".join(
                 f"[{item['source_name']}｜{item['title']}｜{item['version']}] {item['content']}"
@@ -305,7 +393,32 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
                 "以下为来源已核验的公共卫生健康教育内容，仅可用于一般健康教育和就医提示，"
                 "不得扩展为诊断、处方、剂量或停换药建议：\n" + official_block
             )
-            context["evidence_pack"] = EvidencePack(knowledge_hits=official_hits)
+            context["evidence_pack"] = EvidencePack(
+                knowledge_hits=[
+                    {**item, "evidence_kind": EvidenceSourceType.REVIEWED_KNOWLEDGE.value}
+                    for item in official_hits
+                ]
+            )
+        if trusted_hits:
+            trusted_block = "\n".join(
+                f"[{item['source_name']}｜{item['title']}｜{item['version']}] {item['content']}"
+                for item in trusted_hits
+            )
+            rulebook = (rulebook + "\n\n" if rulebook else "") + (
+                "以下为来源可信的药品/指南通用信息，可用于一般解释，"
+                "不得据此给出个体化剂量或治疗结论：\n" + trusted_block
+            )
+            pack = context.get("evidence_pack") or EvidencePack()
+            pack.knowledge_hits.extend(
+                {**item, "evidence_kind": EvidenceSourceType.TRUSTED_MEDICAL_SOURCE.value}
+                for item in trusted_hits
+            )
+            context["evidence_pack"] = pack
+        contract = context.get("contract")
+        if contract is not None:
+            contract_block = contract_summary_text(contract)
+            if contract_block:
+                rulebook = (rulebook + "\n\n" if rulebook else "") + contract_block
         if rulebook:
             patient_block = context.get("conversation_context")
             merged = rulebook
@@ -331,6 +444,7 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
                 allergy_drugs=context["allergy_drugs"],
                 allergy_history_unknown=context["allergy_history_unknown"],
                 risk_signals=context["risk_signals"],
+                task_contract=contract,
             )
         except RuntimeError as exc:
             logger.warning("LLM executor unavailable; using deterministic medical fallback: %s", exc)
@@ -393,6 +507,10 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
             state.note(f"missing_retry:{attempt}")
             return "retrieval"
 
+        # Bounded Safety：知识证据分层回退（REVIEWED → TRUSTED → 任务风险决定 MODEL）
+        check = _apply_knowledge_requirement(check, pack, state.context.get("contract"))
+        state.context["evidence_check"] = check.model_dump(mode="json")
+
         # ── V2 双轨：LLM 证据法官为主、确定性兜底（缺失重试路径不调用）──
         candidate = state.context.get("candidate_result") or {}
         # A judge cannot validate an empty EvidencePack.  Calling it here adds
@@ -452,15 +570,101 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
             "supported_count": len(report.supported_claims),
             "unsupported_count": len(report.unsupported_claims),
         }
-        if route and route.task in (TaskType.MEDICATION_ALLERGY_CHECK, TaskType.RISK_TRIAGE) and not report.valid:
-            result["answer"] = (
-                "当前记录无法支持回答中的具体结论（存在无法核验的药物/剂量/日期表述）。"
-                "请以医生或药师的确认意见为准，不要据此自行用药。"
+        # 引用校验只负责实体级核对与 trace；整段覆盖已由 Claim 级验证替代。
+        state.note("citation_checked")
+        return "claim_extract"
+
+    def claim_extract_node(state: AgentGraphState) -> Optional[str]:
+        result = state.context["candidate_result"]
+        answer = result.get("answer", "")
+        llm_used = (
+            not state.context.get("llm_unavailable")
+            and not state.context.get("deterministic_direct")
+        )
+        claims = extract_claims(
+            state.context.get("question", ""),
+            answer,
+            state.context.get("contract"),
+            llm=state.context.get("judge_llm") if llm_used else None,
+        )
+        state.context["claims"] = claims
+        state.note(f"claims:{len(claims)}")
+        return "claim_validate"
+
+    def claim_validate_node(state: AgentGraphState) -> Optional[str]:
+        claims: list[Claim] = state.context.get("claims") or []
+        pack = state.context.get("evidence_pack") or EvidencePack()
+        judge = None
+        evidence_check = None
+        raw_check = state.context.get("evidence_check")
+        if raw_check:
+            try:
+                evidence_check = EvidenceCheck.model_validate(raw_check)
+            except Exception:
+                evidence_check = None
+            if evidence_check is not None and evidence_check.judge is not None:
+                judge = evidence_check.judge
+        claims = validate_claims(
+            claims,
+            pack,
+            state.context.get("contract"),
+            evidence_check=evidence_check,
+            judge=judge,
+            question=state.context.get("question"),
+        )
+        state.context["claims"] = claims
+        state.context["evidence_check_model"] = evidence_check
+        state.note(f"claims_validated:{sum(1 for c in claims if c.support_status.value == 'supported')}")
+        return "safety_enforce"
+
+    def safety_enforce_node(state: AgentGraphState) -> Optional[str]:
+        claims: list[Claim] = state.context.get("claims") or []
+        contract = state.context.get("contract")
+        result = state.context["candidate_result"]
+        claims = enforce_claim_safety(claims, contract)
+        state.context["claims"] = claims
+        evidence_check = state.context.get("evidence_check_model")
+        decision, reasons = decide_final(
+            claims,
+            evidence_check=evidence_check,
+            contract=contract,
+            question=state.context.get("question", ""),
+            deterministic_direct=bool(state.context.get("deterministic_direct")),
+        )
+        if (
+            decision is FinalDecision.REFUSE
+            and any("prohibited" in reason for reason in reasons)
+        ):
+            result["answer"] = _SAFETY_REFUSAL_TEXT
+            state.note("refused:prohibited_action")
+        elif decision is FinalDecision.PARTIAL and not state.context.get("deterministic_direct"):
+            pruned_answer, prune_notes = prune_answer(
+                result.get("answer", ""),
+                claims,
+                decision,
+                reasons,
             )
-            result["next_action"] = "contact_doctor"
-            state.note("citation_failed:overridden")
-        else:
-            state.note("citation_checked")
+            result["answer"] = pruned_answer
+            reasons = [*reasons, *prune_notes]
+        result["decision"] = decision.value
+        result["decision_reasons"] = reasons
+        state.context["final_decision"] = decision
+        state.note(f"decision:{decision.value}")
+        return "final_decision"
+
+    def final_decision_node(state: AgentGraphState) -> Optional[str]:
+        decision = state.context.get("final_decision")
+        result = state.context["candidate_result"]
+        if decision is FinalDecision.ESCALATE:
+            result["risk_level"] = RiskLevel.URGENT.value
+            result["next_action"] = NextAction.CONTACT_DOCTOR.value
+        elif decision is FinalDecision.CLARIFY:
+            if result.get("next_action") not in (NextAction.CONTACT_DOCTOR.value,):
+                result["next_action"] = NextAction.CONTINUE_SUPPLEMENT.value
+        elif decision is FinalDecision.REFUSE:
+            result["risk_level"] = RiskLevel.URGENT.value
+            result["next_action"] = NextAction.CONTACT_DOCTOR.value
+        state.note("decision_applied")
         return "output_assemble"
 
     def output_assemble_node(state: AgentGraphState) -> Optional[str]:
@@ -473,6 +677,9 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
             "unsupported_count": 0,
         }
         result.setdefault("claim_bindings", [])
+        claims = state.context.get("claims")
+        if claims:
+            result["claim_bindings"] = [claim.model_dump(mode="json") for claim in claims]
         result.setdefault("planning", {})
         result["planning"].setdefault("graph", graph.describe())
         route = state.context.get("route")
@@ -482,6 +689,7 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
         if pack is not None:
             evidence_check = state.context.get("evidence_check") or {}
             result["evidence_coverage"] = evidence_check.get("coverage", pack.coverage)
+            result["patient_evidence_summary"] = _build_patient_evidence_summary(pack)
             knowledge_sources = [
                 {
                     key: hit.get(key)
@@ -504,6 +712,8 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
             # generic contract defaults turn it into an open-ended follow-up.
             result["next_action"] = NextAction.CONTACT_DOCTOR.value
             result["risk_level"] = RiskLevel.ROUTINE.value
+            result.setdefault("decision", FinalDecision.CLARIFY.value)
+            result.setdefault("decision_reasons", ["structured_fact_missing"])
         # V2 阶段 4：普通风险症状在正常回答中内嵌升级指引（不强信号不拦截）
         if result.get("risk_level") == RiskLevel.ROUTINE.value:
             guided, escalated = embed_escalation_guidance(
@@ -536,15 +746,20 @@ def install_graph_pipeline(namespace: dict[str, Any]) -> None:
         state.note("response_ready")
         return None
 
-    graph = AgentGraph(entrypoint="safety", max_steps=10)
+    graph = AgentGraph(entrypoint="safety", max_steps=16)
     graph.add_node(AgentNode("safety", "safety", "正在执行医疗安全检查...", safety_node))
     graph.add_node(AgentNode("task_route", "classify", "正在识别任务类型与检索来源...", task_route_node))
+    graph.add_node(AgentNode("task_contract", "classify", "正在构建任务契约...", task_contract_node))
     graph.add_node(AgentNode("clarify", "clarify", "正在追问症状细节...", clarify_node))
     graph.add_node(AgentNode("symptom_assessment", "agent", "正在评估症状并整理下一步...", symptom_assessment_node))
     graph.add_node(AgentNode("retrieval", "context", "正在检查结构化病历事实...", retrieval_node))
     graph.add_node(AgentNode("generate", "agent", "正在执行受控 Agent 流程...", generate_node))
     graph.add_node(AgentNode("evidence_check", "evidence", "正在检查证据充分性...", evidence_check_node))
     graph.add_node(AgentNode("citation_validate", "evidence", "正在校验引用与依据...", citation_validate_node))
+    graph.add_node(AgentNode("claim_extract", "evidence", "正在提取回答论断...", claim_extract_node))
+    graph.add_node(AgentNode("claim_validate", "evidence", "正在逐条验证论断...", claim_validate_node))
+    graph.add_node(AgentNode("safety_enforce", "evidence", "正在执行安全策略...", safety_enforce_node))
+    graph.add_node(AgentNode("final_decision", "evidence", "正在形成最终决策...", final_decision_node))
     graph.add_node(AgentNode("output_assemble", "agent", "正在整理回答...", output_assemble_node))
 
     def graph_context(question: str, *, on_phase=None, **kwargs: Any) -> dict[str, Any]:

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
 from app.schemas.retrieval import RetrievalRoute, RetrievalSource, TaskType
+from app.services.task_contract import canonical_task
 
 
 @dataclass(frozen=True)
@@ -42,11 +43,12 @@ class _TaskSpec:
         )
 
 
-# 规则按优先级排列：高风险分流 → 药物教育 → 用药过敏 → 报告理解 → 纵向比较 →
-# 就医准备 → 一般健康教育 → 病历事实（按子类型）→ 兜底。
+# 规则按优先级排列（Bounded Safety canonical 任务）：
+# 急诊分流 → 药物教育 → 剂量决策 → 用药/过敏核对 → 记录解读（报告/纵向/跨科室）
+# → 症状分流 → 就医准备 → 病历事实（按子类型）→ 一般教育 → 兜底。
 _SPECS: tuple[_TaskSpec, ...] = (
     _TaskSpec(
-        task=TaskType.RISK_TRIAGE,
+        task=TaskType.EMERGENCY_TRIAGE,
         sources=(RetrievalSource.NO_RETRIEVAL,),
         required_facts=(),
         forbidden_actions=("self_treatment", "diagnosis"),
@@ -59,9 +61,8 @@ _SPECS: tuple[_TaskSpec, ...] = (
         route_reason="detected_emergency_or_urgent_symptom",
     ),
     # 一般药物教育（非个体化）：了解药物用途、副作用、一般用法等。
-    # 与"用药过敏核对"的区别：个体化剂量/停药/换药仍归用药核对并拦截。
     _TaskSpec(
-        task=TaskType.GENERAL_HEALTH_EDUCATION,
+        task=TaskType.MEDICATION_EDUCATION,
         sources=(RetrievalSource.CLINICAL_KNOWLEDGE,),
         required_facts=(),
         forbidden_actions=("individualized_advice",),
@@ -69,46 +70,49 @@ _SPECS: tuple[_TaskSpec, ...] = (
         patterns=(
             r"(?:阿莫西林|头孢|青霉素|磺胺|布洛芬|阿司匹林|硝酸甘油|缬沙坦|氨氯地平|"
             r"二甲双胍|格列美脲|奥美拉唑|塞来昔布|他汀|药).{0,10}"
-            r"(?:是治什么的|治什么|有什么用|作用|功效|副作用|不良反应|注意事项|禁忌|"
+            r"(?:是治什么的|治什么|是什么药|是做什么的|是干嘛用的|有什么用|作用|功效|副作用|不良反应|注意事项|禁忌|"
             r"什么时候吃|怎么吃|怎么用|用法|饭前|饭后|空腹|随餐|一天几次|一日几次)",
         ),
         route_reason="drug_education_keywords",
     ),
-    # 用药与过敏核对按子类型拆分：过敏查询、当前用药、个体化决策、具体药品用法。
+    # 剂量/停药/换药等个体化决策：即使证据充分也必须由安全策略拦截。
     _TaskSpec(
-        task=TaskType.MEDICATION_ALLERGY_CHECK,
+        task=TaskType.MEDICATION_DOSING,
         sources=(RetrievalSource.STRUCTURED_PATIENT_FACT, RetrievalSource.CLINICAL_KNOWLEDGE),
+        required_facts=("current_medications", "diagnosis"),
+        forbidden_actions=("dose_change", "stop_medication", "start_medication", "drug_switch", "give_dose"),
+        max_retrieval_rounds=1,
+        patterns=(
+            r"停药|停用|减量|加量|换药|替换.{0,4}药|吃几片|吃多少|用多少|剂量|毫克|mg|"
+            r"漏服|忘吃|漏吃|多吃|过量|相互作用|一起吃|同时吃|配伍|"
+            r"(?:我|我的|本人|孩子).{0,10}(?:阿司匹林|布洛芬|缬沙坦|氨氯地平|药).{0,8}(?:怎么吃|怎么用|怎么喝)",
+        ),
+        route_reason="individualized_medication_dosing",
+    ),
+    # 用药与过敏核对：过敏查询、当前用药、具体药能不能用。
+    _TaskSpec(
+        task=TaskType.MEDICATION_RECONCILIATION,
+        sources=(RetrievalSource.STRUCTURED_PATIENT_FACT,),
         required_facts=("allergy_history",),
-        forbidden_actions=("dose_change", "stop_medication", "start_medication", "drug_switch"),
+        forbidden_actions=("dose_change", "stop_medication", "start_medication", "drug_switch", "conclude_safety"),
         max_retrieval_rounds=1,
         patterns=(r"过敏",),
         route_reason="medication_allergy_lookup",
     ),
     _TaskSpec(
-        task=TaskType.MEDICATION_ALLERGY_CHECK,
+        task=TaskType.MEDICATION_RECONCILIATION,
         sources=(RetrievalSource.STRUCTURED_PATIENT_FACT,),
         required_facts=("current_medications",),
-        forbidden_actions=("dose_change", "stop_medication", "start_medication", "drug_switch"),
+        forbidden_actions=("dose_change", "stop_medication", "start_medication", "drug_switch", "conclude_safety"),
         max_retrieval_rounds=1,
-        patterns=(r"吃什么药|什么药|用药|药物|现在吃|平时吃",),
+        patterns=(r"吃什么药|什么药|用药|药物|现在吃|平时吃|目前用药",),
         route_reason="current_medications_lookup",
     ),
     _TaskSpec(
-        task=TaskType.MEDICATION_ALLERGY_CHECK,
+        task=TaskType.MEDICATION_RECONCILIATION,
         sources=(RetrievalSource.STRUCTURED_PATIENT_FACT, RetrievalSource.CLINICAL_KNOWLEDGE),
         required_facts=("allergy_history", "current_medications"),
-        forbidden_actions=("dose_change", "stop_medication", "start_medication", "drug_switch"),
-        max_retrieval_rounds=1,
-        patterns=(
-            r"停药|减量|加量|换药|吃几片|吃多少|剂量|漏服|相互作用|一起吃|同时吃|配伍",
-        ),
-        route_reason="individualized_medication_decision",
-    ),
-    _TaskSpec(
-        task=TaskType.MEDICATION_ALLERGY_CHECK,
-        sources=(RetrievalSource.STRUCTURED_PATIENT_FACT,),
-        required_facts=("current_medications",),
-        forbidden_actions=("dose_change", "stop_medication", "start_medication", "drug_switch"),
+        forbidden_actions=("dose_change", "stop_medication", "start_medication", "drug_switch", "conclude_safety"),
         max_retrieval_rounds=1,
         patterns=(
             r"(?:阿莫西林|头孢|青霉素|磺胺|布洛芬|阿司匹林|硝酸甘油|缬沙坦|氨氯地平|"
@@ -117,10 +121,10 @@ _SPECS: tuple[_TaskSpec, ...] = (
         route_reason="drug_usage_check",
     ),
     _TaskSpec(
-        task=TaskType.MEDICATION_ALLERGY_CHECK,
+        task=TaskType.MEDICATION_RECONCILIATION,
         sources=(RetrievalSource.STRUCTURED_PATIENT_FACT,),
         required_facts=("current_medications",),
-        forbidden_actions=("dose_change", "stop_medication", "start_medication", "drug_switch"),
+        forbidden_actions=("dose_change", "stop_medication", "start_medication", "drug_switch", "conclude_safety"),
         max_retrieval_rounds=1,
         patterns=(
             r"阿莫西林|头孢|青霉素|磺胺|布洛芬|阿司匹林|硝酸甘油|缬沙坦|氨氯地平|"
@@ -128,8 +132,9 @@ _SPECS: tuple[_TaskSpec, ...] = (
         ),
         route_reason="drug_name_keywords",
     ),
+    # 记录解读：报告理解、纵向比较、跨科室关联。
     _TaskSpec(
-        task=TaskType.REPORT_COMPREHENSION,
+        task=TaskType.PATIENT_RECORD_INTERPRETATION,
         sources=(RetrievalSource.REPORT_CONTEXT, RetrievalSource.CLINICAL_KNOWLEDGE),
         required_facts=("report_facts",),
         forbidden_actions=("diagnosis_inference", "treatment_recommendation"),
@@ -141,13 +146,14 @@ _SPECS: tuple[_TaskSpec, ...] = (
         route_reason="report_or_lab_keywords",
     ),
     _TaskSpec(
-        task=TaskType.LONGITUDINAL_COMPARISON,
+        task=TaskType.PATIENT_RECORD_INTERPRETATION,
         sources=(RetrievalSource.MEDICAL_TIMELINE, RetrievalSource.STRUCTURED_PATIENT_FACT),
         required_facts=("timeline_records",),
         forbidden_actions=("diagnosis_inference",),
         max_retrieval_rounds=1,
         patterns=(
-            r"和上次|跟上次|相比|变化|对比|趋势|之前.{0,8}这次|这次.{0,8}之前|下降|升高",
+            r"和上次|跟上次|相比|变化|对比|趋势|之前.{0,8}这次|这次.{0,8}之前|下降|升高|"
+            r"控制得怎么样|控制得如何|有关系吗|有关联|关联",
         ),
         route_reason="comparison_or_trend_keywords",
     ),
@@ -162,22 +168,36 @@ _SPECS: tuple[_TaskSpec, ...] = (
         ),
         route_reason="visit_preparation_keywords",
     ),
+    # 症状分流：低风险症状咨询与模糊主诉（澄清闭环前置拦截）。
     _TaskSpec(
-        task=TaskType.GENERAL_HEALTH_EDUCATION,
+        task=TaskType.SYMPTOM_TRIAGE,
+        sources=(RetrievalSource.CLINICAL_KNOWLEDGE,),
+        required_facts=(),
+        forbidden_actions=("diagnosis", "treatment_recommendation"),
+        max_retrieval_rounds=1,
+        patterns=(
+            r"(?:发热|发烧|咳嗽|胸闷|头晕|恶心|呕吐|腹泻|疼痛|心慌|乏力|抽搐|惊厥|"
+            r"头痛|胃痛|喉咙痛|鼻塞|流鼻涕|失眠).{0,10}(?:怎么办|怎么处理|怎么回事|什么原因|不舒服)",
+        ),
+        route_reason="symptom_triage_keywords",
+    ),
+    # 一般健康教育（非个体化）。
+    _TaskSpec(
+        task=TaskType.GENERAL_MEDICAL_EDUCATION,
         sources=(RetrievalSource.CLINICAL_KNOWLEDGE,),
         required_facts=(),
         forbidden_actions=("individualized_advice",),
         max_retrieval_rounds=1,
         patterns=(
             r"注意什么|日常生活中|日常|饮食|运动|生活方式|一般.{0,4}(注意|建议)|"
-            r"科普|是什么病|什么是|应该怎么办|怎么处理",
+            r"科普|是什么病|什么是|应该怎么办|怎么处理|去医院|就医|什么时候去医院",
         ),
         route_reason="general_health_education_keywords",
     ),
     # 病历事实核验按子类型拆分，required_facts 只取本类问题所需字段，
     # 避免"查一个医生还要有手术史"导致的不必要澄清/拒答。
     _TaskSpec(
-        task=TaskType.FACT_VERIFICATION,
+        task=TaskType.PATIENT_FACT_LOOKUP,
         sources=(RetrievalSource.STRUCTURED_PATIENT_FACT,),
         required_facts=("emergency_contact",),
         forbidden_actions=("diagnosis_inference",),
@@ -186,7 +206,7 @@ _SPECS: tuple[_TaskSpec, ...] = (
         route_reason="fact_contact_lookup",
     ),
     _TaskSpec(
-        task=TaskType.FACT_VERIFICATION,
+        task=TaskType.PATIENT_FACT_LOOKUP,
         sources=(RetrievalSource.STRUCTURED_PATIENT_FACT,),
         required_facts=("visit_records", "physician"),
         forbidden_actions=("diagnosis_inference",),
@@ -198,7 +218,7 @@ _SPECS: tuple[_TaskSpec, ...] = (
         route_reason="fact_visit_lookup",
     ),
     _TaskSpec(
-        task=TaskType.FACT_VERIFICATION,
+        task=TaskType.PATIENT_FACT_LOOKUP,
         sources=(RetrievalSource.STRUCTURED_PATIENT_FACT,),
         required_facts=("surgeries",),
         forbidden_actions=("diagnosis_inference",),
@@ -207,20 +227,20 @@ _SPECS: tuple[_TaskSpec, ...] = (
         route_reason="fact_surgery_lookup",
     ),
     _TaskSpec(
-        task=TaskType.FACT_VERIFICATION,
+        task=TaskType.PATIENT_FACT_LOOKUP,
         sources=(RetrievalSource.STRUCTURED_PATIENT_FACT,),
         required_facts=("diagnosis",),
         forbidden_actions=("diagnosis_inference",),
         max_retrieval_rounds=0,
         patterns=(
-            r"诊断过|确诊过|什么病|疾病|诊断|血糖|血压",
+            r"诊断过|确诊过|什么病|疾病|诊断|血糖|血压|低密度脂蛋白|ldl|胆固醇|糖化血红蛋白|hba1c",
         ),
         route_reason="fact_diagnosis_lookup",
     ),
 )
 
 _FALLBACK_SPEC = _TaskSpec(
-    task=TaskType.GENERAL_HEALTH_EDUCATION,
+    task=TaskType.GENERAL_MEDICAL_EDUCATION,
     sources=(RetrievalSource.CLINICAL_KNOWLEDGE,),
     required_facts=(),
     forbidden_actions=("individualized_advice",),
@@ -238,13 +258,15 @@ LLM_CLASSIFIER_ENABLED = os.getenv("LLM_CLASSIFIER_ENABLED", "false").strip().lo
 )
 
 _TASK_DESCRIPTIONS = {
-    TaskType.FACT_VERIFICATION: "查询患者病历/就诊记录中的明确事实（诊断、过敏、手术、接诊医生等）",
-    TaskType.MEDICATION_ALLERGY_CHECK: "用药/过敏核对、个体化用药决策（剂量、停药、换药）",
-    TaskType.REPORT_COMPREHENSION: "理解检查报告内容",
-    TaskType.LONGITUDINAL_COMPARISON: "比较不同日期记录的指标/病情变化",
-    TaskType.RISK_TRIAGE: "紧急症状或高风险分流",
+    TaskType.PATIENT_FACT_LOOKUP: "查询患者病历/就诊记录中的明确事实（诊断、过敏、手术、接诊医生等）",
+    TaskType.MEDICATION_RECONCILIATION: "用药/过敏核对",
+    TaskType.MEDICATION_DOSING: "个体化剂量/停药/换药决策（默认禁止）",
+    TaskType.MEDICATION_EDUCATION: "一般药物知识科普（非个体化）",
+    TaskType.PATIENT_RECORD_INTERPRETATION: "理解检查报告与记录变化",
+    TaskType.EMERGENCY_TRIAGE: "紧急症状或高风险分流",
+    TaskType.SYMPTOM_TRIAGE: "低风险症状咨询与澄清",
     TaskType.VISIT_PREPARATION: "整理就医准备问题清单",
-    TaskType.GENERAL_HEALTH_EDUCATION: "一般健康/药物知识科普（非个体化）",
+    TaskType.GENERAL_MEDICAL_EDUCATION: "一般健康知识科普（非个体化）",
 }
 
 
@@ -307,9 +329,19 @@ def route_question(
 
 def route_for_task(task: TaskType) -> RetrievalRoute:
     """按任务类型返回默认路由（供评估用例与测试构造证据计划）。"""
+    task = canonical_task(task)
     for spec in _SPECS:
         if spec.task is task:
             return spec.to_route()
     if _FALLBACK_SPEC.task is task:
         return _FALLBACK_SPEC.to_route()
-    raise ValueError(f"Unknown task type: {task}")
+    # canonical 任务（如 clinical_decision）未在规则中直接产出时，
+    # 返回一个安全的默认路由，保证评估/规则手册覆盖测试可构造证据计划。
+    return RetrievalRoute(
+        task=task,
+        sources=[RetrievalSource.CLINICAL_KNOWLEDGE],
+        required_facts=[],
+        forbidden_actions=["individualized_advice"],
+        max_retrieval_rounds=1,
+        route_reason="task_default_route",
+    )

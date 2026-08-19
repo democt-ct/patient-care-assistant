@@ -1798,6 +1798,11 @@ def _build_safety_gate_result(
                 "action": decision.action.value,
                 "reason": decision.reason,
                 "detected_signals": list(decision.detected_signals),
+                "risk_level": decision.risk_level,
+                "risk_signals": list(decision.risk_signals),
+                "restricted_actions": list(decision.restricted_actions),
+                "prohibited_actions": list(decision.prohibited_actions),
+                "requires_clinical_oversight": decision.requires_clinical_oversight,
             },
             "message": "Response safely blocked before model generation.",
         },
@@ -1819,6 +1824,15 @@ def _structured_fact_tool_for_question(question: str) -> Optional[str]:
     """Select an exact-record lookup that is safe to run without an LLM."""
     normalized = (question or "").strip().lower()
     if not normalized:
+        return None
+    # 药物教育/一般用法问题不属于个体化记录查询，避免结构化直答误拦教育。
+    if any(
+        marker in normalized
+        for marker in (
+            "是什么药", "是治什么的", "治什么", "有什么用", "作用",
+            "副作用", "什么时候吃", "怎么吃", "注意事项",
+        )
+    ):
         return None
     if any(keyword in normalized for keyword in ("紧急联系人", "联系人", "过敏", "磺胺", "青霉素", "头孢", "阿司匹林", "上次在")):
         return "get_patient_profile"
@@ -1949,6 +1963,7 @@ def run_agent_execution(
     allergy_drugs: Optional[list[str]] = None,
     allergy_history_unknown: bool = False,
     risk_signals: Optional[MCPRiskSignals] = None,
+    task_contract: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Executor adapter: run intent → plan → tool execution → generate.
 
@@ -2048,6 +2063,9 @@ def run_agent_execution(
         return direct
 
     tools = [tool.model_dump() for tool in mcp_server.list_tools() if tool.name != "issue_identity_token"]
+    if task_contract is not None and getattr(task_contract, "allowed_tools", None):
+        allowed = set(task_contract.allowed_tools)
+        tools = [tool for tool in tools if tool.get("name") in allowed]
     plan_candidates = _generate_plan_candidates(
         llm,
         question=question,

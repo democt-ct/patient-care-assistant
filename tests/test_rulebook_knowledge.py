@@ -70,7 +70,7 @@ def test_llm_classifier_error_falls_back_to_default_route(monkeypatch):
     monkeypatch.setattr(router, "LLM_CLASSIFIER_ENABLED", True)
     llm = _FakeLLM(error=RuntimeError("unavailable"))
     route = route_question("随便聊聊今天天气", llm=llm)
-    assert route.task is TaskType.GENERAL_HEALTH_EDUCATION
+    assert route.task is TaskType.GENERAL_MEDICAL_EDUCATION
     assert route.route_reason == "fallback_non_individualized"
 
 
@@ -79,7 +79,7 @@ def test_llm_classifier_disabled_keeps_deterministic_rules(monkeypatch):
 
     monkeypatch.setattr(router, "LLM_CLASSIFIER_ENABLED", False)
     route = route_question("我青霉素过敏，能用头孢吗？", llm=_FakeLLM(text='{"task": "visit_preparation"}'))
-    assert route.task is TaskType.MEDICATION_ALLERGY_CHECK
+    assert route.task is TaskType.MEDICATION_RECONCILIATION
 
 
 def test_deterministic_rules_still_win_before_llm_classifier(monkeypatch):
@@ -88,4 +88,4 @@ def test_deterministic_rules_still_win_before_llm_classifier(monkeypatch):
     monkeypatch.setattr(router, "LLM_CLASSIFIER_ENABLED", True)
     llm = _FakeLLM(text='{"task": "general_health_education"}')
     route = route_question("我青霉素过敏，能用头孢吗？", llm=llm)
-    assert route.task is TaskType.MEDICATION_ALLERGY_CHECK
+    assert route.task is TaskType.MEDICATION_RECONCILIATION

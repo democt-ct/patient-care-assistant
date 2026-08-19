@@ -1,5 +1,16 @@
 # CHANGELOG — 患者医疗信息 Agent
 
+## 2026-08-19 — 「有界安全（Bounded Safety）」架构升级
+
+- **任务契约**：`TaskType` 新增 9 类 canonical 任务（`general_medical_education` / `medication_education` / `medication_dosing` / `medication_reconciliation` / `patient_fact_lookup` / `patient_record_interpretation` / `symptom_triage` / `clinical_decision` / `emergency_triage`），旧任务值保留为兼容别名并提供 `canonical_task()` 归一化；路由按新任务细分，评估路由准确率按 canonical 比较。
+- **Task Contract**：新增确定性注册表 `app/services/task_contract.py`，从 `RetrievalRoute` 扩展出允许/禁止动作、允许工具、证据要求、Claim 类型边界、监督要求与回退策略；契约注入 LLM 执行器并过滤工具列表，LLM 不得改写任务与策略。
+- **证据分层**：`EvidenceItem` 新增 `evidence_kind`（PATIENT_RECORD / REVIEWED_KNOWLEDGE / TRUSTED_MEDICAL_SOURCE / MODEL_KNOWLEDGE）、`trust_level`、`patient_specific` 等字段；`EvidencePack` 增加按类型取用方法。
+- **可信医学来源**：新增策展注册表 `app/config/trusted_medical_sources.py`（药品说明书/指南级通用信息，第一期覆盖种子数据常见药物），作为 Reviewed Knowledge 之后的第二层证据；缺失时按任务风险决定是否允许低风险 Model Knowledge 兜底，不再「审核知识为空即拒答」。
+- **Claim 级验证**：新增 `app/services/claim_extraction.py`（LLM 结构化提取 + 确定性分句兜底）、`claim_validator.py`（按 claim_type + 契约要求判定 SUPPORTED / PARTIALLY_SUPPORTED / INSUFFICIENT / CONFLICT / UNSUPPORTED 并绑定 evidence_ids）、`safety_policy.py`（确定性禁止动作执行 + Final Decision 聚合 + PARTIAL 裁剪）。
+- **最终决策**：输出契约新增 `decision`（PASS / PARTIAL / CLARIFY / REFUSE / ESCALATE）与 `patient_evidence_summary`；Graph 新增 `task_contract → claim_extract → claim_validate → safety_enforce → final_decision` 节点；PARTIAL 按「替换 + 安全提示」裁剪回答，REFUSE 替换为安全拒答文案，全部写入 `decision_reasons` 与轨迹。
+- **旧逻辑消除**：`evidence_policy` 中「审核知识为空 → 拒答/澄清」删除；高危拒答仅保留给临床决策类任务；`citation_validate` 对用药/风险任务「整段覆盖拒答」改为 Claim 级处理。
+- **评估与前端**：51 条用例任务值迁移到 canonical（test 指标口径不变），新增 6 条 `bounded-*` dev 用例；新增 5 个测试文件（含 12 个重点场景验收）；前端类型与评估持久化增量支持 `decision` / `patient_evidence_summary`。
+
 ## 2026-08-11 — 统一启动入口：npm run dev 取代 bat 脚本
 
 - 新增根目录 `package.json` 与 Node 启动器 `scripts/dev.js`：`npm run dev` 一条命令拉起 Docker 基础设施（PostgreSQL + Redis）→ 等待数据库就绪 → 并行启动后端（uvicorn `--reload`）与前端（Vite）→ 自动打开浏览器；`Ctrl+C` 统一停止全部服务。

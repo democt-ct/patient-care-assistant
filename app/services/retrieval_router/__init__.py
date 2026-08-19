@@ -27,7 +27,7 @@ def route_question(question: str, *, context=None, llm=None) -> RetrievalRoute: 
         and _SAFETY_CONTEXT.search(text)
     ):
         return RetrievalRoute(  # noqa: F821
-            task=TaskType.MEDICATION_ALLERGY_CHECK,  # noqa: F821
+            task=TaskType.MEDICATION_RECONCILIATION,  # noqa: F821
             sources=[RetrievalSource.STRUCTURED_PATIENT_FACT, RetrievalSource.CLINICAL_KNOWLEDGE],  # noqa: F821
             required_facts=["allergy_history", "current_medications"],
             forbidden_actions=["dose_change", "stop_medication", "start_medication", "drug_switch"],

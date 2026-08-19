@@ -160,6 +160,8 @@ export const agentApi = {
         memory_debug?: MemoryDebugPayload;
         risk_level?: string;
         next_action?: string;
+        decision?: string;
+        patient_evidence_summary?: string;
         evidence_summary?: string;
         knowledge_sources?: KnowledgeSource[];
         task_route?: Record<string, unknown>;

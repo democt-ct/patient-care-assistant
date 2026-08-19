@@ -17,8 +17,18 @@ from app.schemas.retrieval import (
     EvidencePack,
     EvidenceStatus,
     RetrievalRoute,
+    TaskType,
 )
 from app.services.agentic_retrieval import required_fact_covered
+from app.services.task_contract import canonical_task
+
+_CLINICAL_REFUSE_TASKS = {
+    TaskType.MEDICATION_DOSING,
+    TaskType.MEDICATION_RECONCILIATION,
+    TaskType.CLINICAL_DECISION,
+    TaskType.MEDICATION_ALLERGY_CHECK,
+    TaskType.RISK_TRIAGE,
+}
 
 # 只有这些字段在同一值域出现不同值时才判定为“来源冲突”；
 # 用药剂量随日期调整属于纵向变化，不自动判为冲突。
@@ -133,7 +143,12 @@ def evaluate_evidence(
     max_attempts = min(max_attempts or (2 if route.max_retrieval_rounds > 0 else 1), 2)
     has_evidence = bool(pack.items or pack.knowledge_hits)
 
-    if route.forbidden_actions and required and not has_evidence:
+    if (
+        route.forbidden_actions
+        and required
+        and not has_evidence
+        and canonical_task(route.task) in _CLINICAL_REFUSE_TASKS
+    ):
         status, decision = EvidenceStatus.HIGH_RISK, EvidenceDecision.REFUSE
     elif conflicts:
         status, decision = EvidenceStatus.CONFLICT, EvidenceDecision.CLARIFY

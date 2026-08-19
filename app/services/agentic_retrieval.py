@@ -16,7 +16,9 @@ from app.schemas.retrieval import (
     EvidenceItem,
     EvidencePack,
     EvidenceSource,
+    EvidenceSourceType,
     RetrievalRoute,
+    TrustLevel,
 )
 
 
@@ -43,6 +45,9 @@ def _item(
         record_date=record_date,
         field=field,
         value=text[:500],
+        evidence_kind=EvidenceSourceType.PATIENT_RECORD,
+        trust_level=TrustLevel.HIGH,
+        patient_specific=True,
     )
 
 
@@ -131,6 +136,7 @@ def supplement_with_knowledge(pack: EvidencePack, knowledge_hits: Sequence[Mappi
             "source_id": _text(hit.get("source_id")) or f"knowledge-{index + 1}",
             "version": _text(hit.get("version")) or "current",
             "content": _text(hit.get("content") or hit.get("text"))[:500],
+            "evidence_kind": EvidenceSourceType.REVIEWED_KNOWLEDGE.value,
         }
         for index, hit in enumerate(knowledge_hits)
         if str(hit.get("review_status", "reviewed")).lower() != "rejected"

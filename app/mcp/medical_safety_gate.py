@@ -26,6 +26,12 @@ class SafetyGateDecision:
     action: SafetyGateAction
     reason: str = ""
     detected_signals: tuple[str, ...] = ()
+    # ── Bounded Safety 扩展（保留原字段兼容）──
+    risk_level: str = "routine"  # routine / urgent / emergency
+    risk_signals: tuple[str, ...] = ()
+    restricted_actions: tuple[str, ...] = ()
+    prohibited_actions: tuple[str, ...] = ()
+    requires_clinical_oversight: bool = False
 
     @property
     def blocked(self) -> bool:
@@ -61,6 +67,10 @@ def evaluate_medical_safety(question: str) -> SafetyGateDecision:
             SafetyGateAction.CRISIS,
             reason="self_harm_crisis",
             detected_signals=("self_harm",),
+            risk_level="emergency",
+            risk_signals=("self_harm",),
+            prohibited_actions=("self_treatment", "diagnosis"),
+            requires_clinical_oversight=True,
         )
 
     triage_result = triage(text)
@@ -69,6 +79,11 @@ def evaluate_medical_safety(question: str) -> SafetyGateDecision:
             SafetyGateAction.EMERGENCY,
             reason="emergency_symptom",
             detected_signals=tuple(triage_result.detected_symptoms),
+            risk_level="emergency",
+            risk_signals=tuple(triage_result.detected_symptoms),
+            restricted_actions=("self_treatment", "medication_advice"),
+            prohibited_actions=("diagnosis",),
+            requires_clinical_oversight=True,
         )
 
     matched = tuple(
@@ -79,6 +94,11 @@ def evaluate_medical_safety(question: str) -> SafetyGateDecision:
             SafetyGateAction.CLINICIAN_REVIEW,
             reason="high_risk_clinical_decision",
             detected_signals=matched,
+            risk_level="urgent",
+            risk_signals=matched,
+            restricted_actions=tuple(matched),
+            prohibited_actions=("dose_change", "stop_medication", "drug_switch", "prescribe"),
+            requires_clinical_oversight=True,
         )
     return SafetyGateDecision(SafetyGateAction.ALLOW)
 

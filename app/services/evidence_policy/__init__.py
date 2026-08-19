@@ -35,15 +35,4 @@ def evaluate_evidence(
             decision=EvidenceDecision.RETRIEVE_AGAIN if attempt < max_attempts else EvidenceDecision.CLARIFY,
             attempt=attempt, max_attempts=max_attempts,
         )
-    requires_knowledge = any(source.value == "clinical_knowledge" for source in route.sources)
-    if (
-        route.route_reason not in ("", "fallback_non_individualized")
-        and not route.required_facts and requires_knowledge and not pack.knowledge_hits
-    ):
-        return EvidenceCheck(
-            status=EvidenceStatus.MISSING, coverage=0.0,
-            missing_facts=["clinical_knowledge"], conflicts=check.conflicts,
-            decision=EvidenceDecision.RETRIEVE_AGAIN if attempt < max_attempts else EvidenceDecision.CLARIFY,
-            attempt=attempt, max_attempts=max_attempts,
-        )
     return check

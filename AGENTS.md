@@ -46,7 +46,7 @@
 | **前端开发** | `npm run dev:frontend` | 等价 `cd frontend && npm run dev`，:3000 代理到 :8001 |
 | **Docker 服务** | `npm run docker:infra` | 等价 `docker compose up -d`，启动 PostgreSQL(:5433) 与 Redis(:6380) |
 | **内网穿透** | `start_tunnel.bat`（可选） | 一键后端 + Cloudflare 隧道，依赖 cloudflared |
-| **质量评估** | `python scripts/run_evaluation.py --split test --verbose` | 运行 51 条分层评估用例（21 开发 / 30 独立测试；用例数据源在 `app/config/evaluation_cases.py`） |
+| **质量评估** | `python scripts/run_evaluation.py --split test --verbose` | 运行 57 条分层评估用例（27 开发 / 30 独立测试；用例数据源在 `app/config/evaluation_cases.py`） |
 
 访问：
 - `http://localhost:3000` — React 前端（聊天 + 记忆 + Debug）

@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 from app.schemas.retrieval import (
     EvidenceStatus,
+    FinalDecision,
     NextAction,
     RiskLevel,
 )
@@ -47,6 +48,8 @@ def assemble_output_contract(
     result: dict[str, Any],
     *,
     safety_action: Optional[str] = None,
+    decision: Optional[str] = None,
+    decision_reasons: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """补齐五段输出契约字段并返回同一 ``result`` 字典。
 
@@ -59,23 +62,35 @@ def assemble_output_contract(
     if safety_action in ("emergency", "crisis"):
         result["risk_level"] = RiskLevel.EMERGENCY.value
         result["next_action"] = NextAction.EMERGENCY_CARE.value
+        result.setdefault("decision", FinalDecision.ESCALATE.value)
     elif safety_action == "clinician_review":
         result["risk_level"] = RiskLevel.URGENT.value
         result["next_action"] = NextAction.CONTACT_DOCTOR.value
+        result.setdefault("decision", FinalDecision.REFUSE.value)
     else:
         status = evidence_check.get("status")
         if status == EvidenceStatus.HIGH_RISK.value:
             result["risk_level"] = RiskLevel.URGENT.value
             result["next_action"] = NextAction.CONTACT_DOCTOR.value
+            result.setdefault("decision", FinalDecision.REFUSE.value)
         elif status == EvidenceStatus.CONFLICT.value:
             result.setdefault("risk_level", RiskLevel.ROUTINE.value)
             result["next_action"] = NextAction.CONTACT_DOCTOR.value
+            result.setdefault("decision", FinalDecision.CLARIFY.value)
         elif status == EvidenceStatus.MISSING.value or evidence_check.get("sufficient") is False:
             result.setdefault("risk_level", RiskLevel.ROUTINE.value)
             result["next_action"] = NextAction.CONTINUE_SUPPLEMENT.value
+            result.setdefault("decision", FinalDecision.CLARIFY.value)
         else:
             result.setdefault("risk_level", RiskLevel.ROUTINE.value)
             result.setdefault("next_action", NextAction.VIEW_RECORDS.value)
+            result.setdefault("decision", FinalDecision.PASS.value)
 
     result.setdefault("evidence_summary", _build_evidence_summary(result, evidence_check, safety_action))
+    if decision is not None:
+        result["decision"] = decision
+    if decision_reasons is not None:
+        result["decision_reasons"] = list(decision_reasons)
+    result.setdefault("decision_reasons", [])
+    result.setdefault("patient_evidence_summary", "")
     return result

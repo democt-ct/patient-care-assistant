@@ -70,6 +70,8 @@ def evaluate_case(case: dict, verbose: bool = False) -> dict:
             "evidence_check": result.get("evidence_check"),
             "citation_report": result.get("citation_report"),
             "clarification_required": result.get("clarification_required"),
+            "decision": result.get("decision"),
+            "patient_evidence_summary": result.get("patient_evidence_summary"),
             "answer": answer,
         }
     except Exception as exc:

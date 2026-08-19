@@ -34,6 +34,11 @@ EVIDENCE_JUDGE_ENABLED = os.getenv("EVIDENCE_JUDGE_ENABLED", "true").strip().low
     "yes",
     "on",
 )
+
+
+def _judge_enabled() -> bool:
+    # 兼容测试 monkeypatch：模块属性优先（EVIDENCE_JUDGE_ENABLED）
+    return EVIDENCE_JUDGE_ENABLED
 EVIDENCE_JUDGE_TIMEOUT_SECONDS = float(os.getenv("EVIDENCE_JUDGE_TIMEOUT_SECONDS", "8"))
 
 _JUDGE_SYSTEM_PROMPT = """你是医疗信息 Agent 的【证据法官】。你只负责裁决证据与回答的关系，不诊断疾病、不给治疗建议。
@@ -177,7 +182,7 @@ def judge_evidence(
 
     ``llm`` 可注入（测试用）；为 None 时按配置获取默认 LLM。
     """
-    if not EVIDENCE_JUDGE_ENABLED:
+    if not _judge_enabled():
         return None
     if llm is None:
         try:

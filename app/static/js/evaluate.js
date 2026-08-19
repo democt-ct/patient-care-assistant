@@ -138,7 +138,10 @@ async function persistServerScore(caseData, result, raw) {
       intent: result.intent || null,
       duration_seconds: Number(result.duration) || null,
       trace_id: raw._trace_id || null,
-      extra_result: result.ragas ? { ragas: result.ragas } : null,
+      extra_result: {
+        decision: result.decision || null,
+        ...(result.ragas ? { ragas: result.ragas } : {}),
+      },
     }),
   });
   if (!resp.ok) throw new Error(`evaluation persistence failed: HTTP ${resp.status}`);
@@ -217,6 +220,9 @@ async function runCase(caseData) {
       task_route: raw.task_route || null,
       risk_level: raw.risk_level || null,
       next_action: raw.next_action || null,
+      decision: raw.decision || null,
+      decision_reasons: raw.decision_reasons || [],
+      patient_evidence_summary: raw.patient_evidence_summary || null,
       evidence_check: raw.evidence_check || null,
       citation_report: raw.citation_report || null,
     };

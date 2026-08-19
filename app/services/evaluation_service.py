@@ -17,6 +17,7 @@ from typing import Any, Iterable, Mapping, Optional
 from sqlalchemy.orm import Session
 
 from app.models.audit_log import EvaluationRun
+from app.services.task_contract import canonical_task
 
 SCORING_VERSION = "v2"
 PASSING_SCORE = 60.0
@@ -121,7 +122,10 @@ def evaluate_route_ok(case: Mapping[str, Any], result: Optional[Mapping[str, Any
     if not route:
         # 请求在路由前被安全门禁停止（如紧急分流），不纳入路由准确率样本
         return None
-    return route.get("task") == case.get("task")
+    if not case.get("task") or not route.get("task"):
+        return None
+    # Bounded Safety：新旧任务值按 canonical 归一化后比较
+    return canonical_task(route.get("task")) == canonical_task(case.get("task"))
 
 
 def evaluate_risk_recall(case: Mapping[str, Any], result: Optional[Mapping[str, Any]]) -> Optional[bool]:

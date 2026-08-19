@@ -89,6 +89,9 @@ export interface ChatMessage {
   /** 统一输出契约：依据 / 风险 / 下一步 / 任务类型 */
   risk_level?: string;
   next_action?: string;
+  decision?: string;
+  decision_reasons?: string[];
+  patient_evidence_summary?: string;
   evidence_summary?: string;
   knowledge_sources?: KnowledgeSource[];
   task_route?: Record<string, unknown>;
@@ -154,6 +157,9 @@ export interface AgentQueryResponse {
   chosen_tool?: string;
   risk_level?: string;
   next_action?: string;
+  decision?: string;
+  decision_reasons?: string[];
+  patient_evidence_summary?: string;
   evidence_summary?: string;
   knowledge_sources?: KnowledgeSource[];
   task_route?: Record<string, unknown>;

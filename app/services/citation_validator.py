@@ -22,7 +22,12 @@ _DOSE_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:mg|g|ml|μg|mcg|iu|mmol/l|mmhg|kg)\b"
 
 # 教育性任务允许引用证据包之外的药物通用知识（如"阿莫西林是治什么的"）；
 # 这些任务的回答不按个体化 claim 做证据包匹配，避免过度拒答。
-_EDUCATIONAL_TASKS = ("general_health_education",)
+_EDUCATIONAL_TASKS = (
+    "general_health_education",
+    "general_medical_education",
+    "medication_education",
+    "symptom_triage",
+)
 
 
 @dataclass

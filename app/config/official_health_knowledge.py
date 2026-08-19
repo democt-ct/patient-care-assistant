@@ -45,7 +45,14 @@ OFFICIAL_HEALTH_ENTRIES: tuple[dict[str, Any], ...] = (
 
 def official_health_context_for(question: str, route: RetrievalRoute | None) -> list[dict[str, Any]]:
     """Return source-verified, low-risk education entries relevant to a query."""
-    if route is not None and route.task not in {TaskType.GENERAL_HEALTH_EDUCATION, TaskType.RISK_TRIAGE}:
+    if route is not None and route.task not in {
+        TaskType.GENERAL_HEALTH_EDUCATION,
+        TaskType.GENERAL_MEDICAL_EDUCATION,
+        TaskType.MEDICATION_EDUCATION,
+        TaskType.RISK_TRIAGE,
+        TaskType.EMERGENCY_TRIAGE,
+        TaskType.SYMPTOM_TRIAGE,
+    }:
         return []
     text = (question or "").lower()
     return [

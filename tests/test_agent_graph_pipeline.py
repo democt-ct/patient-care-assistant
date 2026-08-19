@@ -33,17 +33,24 @@ def test_pipeline_records_evidence_stage_for_agent_result(monkeypatch):
     assert [item["node"] for item in result["agent_trajectory"]] == [
         "safety",
         "task_route",
+        "task_contract",
         "retrieval",
         "generate",
         "evidence_check",
         "citation_validate",
+        "claim_extract",
+        "claim_validate",
+        "safety_enforce",
+        "final_decision",
         "output_assemble",
     ]
     assert result["planning"]["graph"]["entrypoint"] == "safety"
-    assert result["task_route"]["task"] == "general_health_education"
+    assert result["task_route"]["task"] == "general_medical_education"
     assert result["risk_level"] == "routine"
     assert result["next_action"] in {"view_records", "continue_supplement"}
     assert result["evidence_summary"]
+    assert result["decision"] in {"pass", "partial", "clarify"}
+    assert result["patient_evidence_summary"] == "未使用患者病历数据。"
 
 
 def test_pipeline_structured_fact_path_goes_through_evidence_and_assembly(monkeypatch):
@@ -83,17 +90,22 @@ def test_pipeline_structured_fact_path_goes_through_evidence_and_assembly(monkey
     assert [item["node"] for item in result["agent_trajectory"]] == [
         "safety",
         "task_route",
+        "task_contract",
         "retrieval",
         "evidence_check",
         "retrieval",
         "evidence_check",
         "citation_validate",
+        "claim_extract",
+        "claim_validate",
+        "safety_enforce",
+        "final_decision",
         "output_assemble",
     ]
     assert result["evidence_check"]["status"] == "missing"
     assert result["evidence_check"]["decision"] == "clarify"
     assert result["evidence_check"]["attempt"] == 2
-    assert result["task_route"]["task"] == "medication_allergy_check"
+    assert result["task_route"]["task"] == "medication_reconciliation"
     assert result["risk_level"] == "routine"
     assert result["next_action"] == "continue_supplement"
     assert result["evidence_summary"]
@@ -165,7 +177,7 @@ def test_pipeline_missing_structured_field_skips_llm_retries():
     assert result["next_action"] == "contact_doctor"
     assert result["evidence_check"]["status"] == "missing"
     assert [item["node"] for item in result["agent_trajectory"]] == [
-        "safety", "task_route", "retrieval", "output_assemble"
+        "safety", "task_route", "task_contract", "retrieval", "output_assemble"
     ]
 
 
@@ -235,7 +247,7 @@ def test_pipeline_drug_education_is_not_over_refused():
     pipeline.install_graph_pipeline(namespace)
     result = namespace["run_agent_tool_query"]("阿莫西林是治什么的？")
 
-    assert result["task_route"]["task"] == "general_health_education"
+    assert result["task_route"]["task"] == "medication_education"
     assert result["citation_report"]["valid"] is True
     assert "阿莫西林" in result["answer"]
     assert result["answer"] != "当前记录无法支持回答中的具体结论（存在无法核验的药物/剂量/日期表述）。"
